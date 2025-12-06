@@ -14,9 +14,11 @@ pub struct AppState {
     pub db_path: String,
     pub server_port: u16,
     pub stream_dir: PathBuf,
+    pub recording_dir: PathBuf,
     // Map<camera_id, ChildProcess>
     // using std::process::Child allows us to kill it later
     pub processes: Arc<Mutex<HashMap<i32, Child>>>,
+    pub recording_processes: Arc<Mutex<HashMap<i32, Child>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,11 +40,16 @@ pub fn run() {
             }
             std::fs::create_dir_all(&stream_dir).expect("failed to create streams dir");
 
+            let recording_dir = app_dir.join("recordings");
+            std::fs::create_dir_all(&recording_dir).expect("failed to create recordings dir");
+
             let state = AppState {
                 db_path: db_path.to_string_lossy().to_string(),
                 server_port: 3333,
                 stream_dir: stream_dir.clone(),
+                recording_dir: recording_dir.clone(),
                 processes: Arc::new(Mutex::new(HashMap::new())),
+                recording_processes: Arc::new(Mutex::new(HashMap::new())),
             };
             
             app.manage(state);
@@ -56,6 +63,7 @@ pub fn run() {
 
                 let app = Router::new()
                     .nest_service("/streams", ServeDir::new(stream_dir))
+                    .nest_service("/recordings", ServeDir::new(recording_dir))
                     .layer(CorsLayer::permissive()); // Allow all CORS
                 
                 let addr = SocketAddr::from(([127, 0, 0, 1], 3333));
