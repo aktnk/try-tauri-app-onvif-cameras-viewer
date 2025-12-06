@@ -59,7 +59,9 @@ pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<
             "-fflags", "nobuffer",
             "-rtsp_transport", "tcp",
             "-i", &rtsp_url,
-            "-c:v", "copy",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-tune", "zerolatency",
             "-an", // Disable audio for stability/latency per reference
             "-f", "hls",
             "-hls_time", "2",

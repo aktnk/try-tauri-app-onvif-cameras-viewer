@@ -27,6 +27,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ streamUrl }) => {
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           video.play().catch(e => console.error("Autoplay was prevented. Please click play.", e));
         });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            console.error("HLS Error:", event, data);
+        });
       } 
       // Native HLS support in Safari
       else if (video.canPlayType('application/vnd.apple.mpegurl')) {

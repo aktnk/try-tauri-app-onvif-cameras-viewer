@@ -32,4 +32,4 @@ src-tauri/Cargo.lock
 temp_source/
 temp_onvif_ref/
 .claude/
-memo1.txt
+memo*.txt
