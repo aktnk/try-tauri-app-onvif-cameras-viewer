@@ -88,8 +88,14 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
 
 ## Contributing
 
-(Placeholder for future contribution guidelines)
+Contributions are welcome! Whether it's reporting a bug, suggesting an enhancement, or submitting a pull request, your input is valued.
+
+1.  **Fork the Project**
+2.  **Create your Feature Branch** (`git checkout -b feature/AmazingFeature`)
+3.  **Commit your Changes** (`git commit -m 'Add some AmazingFeature'`)
+4.  **Push to the Branch** (`git push origin feature/AmazingFeature`)
+5.  **Open a Pull Request**
 
 ## License
 
-(Placeholder for license information)
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
