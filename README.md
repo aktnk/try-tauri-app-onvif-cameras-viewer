@@ -13,6 +13,9 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 -   **Recording**: Record live streams directly to your local disk.
     *   Safely records to `.ts` format and automatically remuxes to `.mp4` upon completion.
 -   **Playback**: Built-in video player to view your recorded clips.
+-   **PTZ Control**: Control Pan, Tilt, and Zoom for supported ONVIF cameras directly from the application.
+    *   Includes intuitive UI for continuous movement controls.
+    *   Displays status for non-PTZ cameras.
 -   **Modern UI**: Built with React, Material Design principles, and styled with Tailwind CSS.
 
 ## Technology Stack
@@ -27,7 +30,7 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 *   **Language**: [Rust](https://www.rust-lang.org/)
 *   **Database**: [SQLite3](https://www.sqlite.org/index.html) with `rusqlite` crate.
 *   **Local Server**: [Axum](https://docs.rs/axum/latest/axum/) for serving HLS streams and recording files.
-*   **ONVIF Protocol**: Custom SOAP implementation for `GetProfiles` and `GetStreamUri`.
+*   **ONVIF Protocol**: Custom SOAP implementation for `GetProfiles`, `GetStreamUri`, and PTZ (`ContinuousMove`, `Stop`).
 *   **Video Processing**: [FFmpeg](https://ffmpeg.org/) for transcoding and recording (requires system FFmpeg).
 
 ## Getting Started
@@ -78,9 +81,9 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
 ## Current Status & Known Issues
 
 *   **Discovery**: Unicast ONVIF device discovery is functional.
-*   **Streaming**: Stable. Fixed previous blackout issues by enforcing H.264 transcoding.
-*   **Recording**: Implemented (Start/Stop/Playback).
-*   **PTZ Control**: Not yet implemented.
+*   **Streaming**: Stable. Transcoding to H.264 ensures wide compatibility.
+*   **Recording**: Fully functional (Record/Stop/Play).
+*   **PTZ Control**: Implemented (Pan/Tilt/Zoom with UI feedback).
 *   **Time Synchronization**: Not yet implemented.
 
 ## Contributing

@@ -191,18 +191,51 @@ pub async fn sync_camera_time(id: i32) -> Result<TimeSyncResult, String> {
 }
 
 #[tauri::command]
-pub async fn check_ptz_capabilities(id: i32) -> Result<PTZCapabilities, String> {
-    Ok(PTZCapabilities { supported: false, capabilities: None })
+pub async fn check_ptz_capabilities(state: State<'_, AppState>, id: i32) -> Result<PTZCapabilities, String> {
+    let cameras = get_cameras(state.clone()).await?;
+    let camera = cameras.into_iter().find(|c| c.id == id).ok_or("Camera not found")?;
+
+    if camera.camera_type != "onvif" {
+        return Ok(PTZCapabilities { supported: false, capabilities: None });
+    }
+
+    match crate::onvif::get_ptz_service_url(&camera).await {
+        Ok(_) => Ok(PTZCapabilities { 
+            supported: true, 
+            capabilities: Some(crate::models::PTZCapabilitiesDetails { hasPanTilt: true, hasZoom: true }) 
+        }),
+        Err(_) => Ok(PTZCapabilities { supported: false, capabilities: None })
+    }
 }
 
 #[tauri::command]
-pub async fn move_ptz(id: i32, movement: PTZMovement) -> Result<PTZResult, String> {
-    Err("Not implemented".to_string())
+pub async fn move_ptz(state: State<'_, AppState>, id: i32, movement: PTZMovement) -> Result<PTZResult, String> {
+    let cameras = get_cameras(state.clone()).await?;
+    let camera = cameras.into_iter().find(|c| c.id == id).ok_or("Camera not found")?;
+
+    if camera.camera_type != "onvif" {
+        return Err("Not an ONVIF camera".to_string());
+    }
+
+    let x = movement.x.unwrap_or(0.0);
+    let y = movement.y.unwrap_or(0.0);
+    let zoom = movement.zoom.unwrap_or(0.0);
+
+    crate::onvif::continuous_move(&camera, x, y, zoom).await?;
+    Ok(PTZResult { success: true, message: "Moving".to_string() })
 }
 
 #[tauri::command]
-pub async fn stop_ptz(id: i32) -> Result<PTZResult, String> {
-    Err("Not implemented".to_string())
+pub async fn stop_ptz(state: State<'_, AppState>, id: i32) -> Result<PTZResult, String> {
+    let cameras = get_cameras(state.clone()).await?;
+    let camera = cameras.into_iter().find(|c| c.id == id).ok_or("Camera not found")?;
+
+    if camera.camera_type != "onvif" {
+         return Err("Not an ONVIF camera".to_string());
+    }
+
+    crate::onvif::stop_move(&camera).await?;
+    Ok(PTZResult { success: true, message: "Stopped".to_string() })
 }
 
 #[tauri::command]
@@ -211,7 +244,7 @@ pub async fn get_camera_capabilities(id: i32) -> Result<CameraCapabilities, Stri
         streaming: true,
         recording: true,
         thumbnails: false,
-        ptz: false,
+        ptz: true, // Optimistically true, or check dynamically
         discovery: false,
         timeSync: false,
         remoteAccess: false,

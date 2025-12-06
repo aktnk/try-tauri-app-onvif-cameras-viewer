@@ -251,6 +251,128 @@ pub async fn get_onvif_stream_url(camera: &Camera) -> Result<String, String> {
     Ok(final_url)
 }
 
+// --- PTZ Functions ---
+
+pub async fn get_ptz_service_url(camera: &Camera) -> Result<String, String> {
+    let xaddr = camera.xaddr.clone().ok_or("No xAddr available")?;
+    let user = camera.user.clone().unwrap_or_default();
+    let pass = camera.pass.clone().unwrap_or_default();
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // GetCapabilities
+    let body = r###"<GetCapabilities xmlns="http://www.onvif.org/ver10/device/wsdl">
+        <Category>PTZ</Category>
+    </GetCapabilities>"###;
+    let envelope = build_soap_envelope(&user, &pass, body);
+
+    let res = client.post(&xaddr)
+        .header("Content-Type", "application/soap+xml; charset=utf-8; action=\"http://www.onvif.org/ver10/device/wsdl/GetCapabilities\"")
+        .body(envelope)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to GetCapabilities: {}", e))?;
+
+    let xml = res.text().await.map_err(|e| e.to_string())?;
+    
+    // Parse PTZ XAddr
+    let re = Regex::new(r"(?s)<[^:]*:PTZ>.*?<[^:]*:XAddr>(.*?)</[^:]*:XAddr>").map_err(|e| e.to_string())?;
+    if let Some(caps) = re.captures(&xml) {
+        return Ok(caps[1].trim().to_string());
+    }
+
+    Err("PTZ Service not found in capabilities".to_string())
+}
+
+async fn get_profile_token(client: &Client, xaddr: &str, user: &str, pass: &str) -> Result<String, String> {
+     let profiles_body = r###"<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>"###;
+    let profiles_envelope = build_soap_envelope(user, pass, profiles_body);
+
+    let profiles_res = client.post(xaddr)
+        .header("Content-Type", "application/soap+xml; charset=utf-8; action=\"http://www.onvif.org/ver10/media/wsdl/GetProfiles\"")
+        .body(profiles_envelope)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to GetProfiles: {}", e))?;
+    
+    let profiles_xml = profiles_res.text().await.map_err(|e| e.to_string())?;
+    parse_first_profile_token(&profiles_xml).ok_or("Failed to parse ProfileToken".to_string())
+}
+
+pub async fn continuous_move(camera: &Camera, x: f32, y: f32, zoom: f32) -> Result<(), String> {
+    let ptz_url = get_ptz_service_url(camera).await?;
+    let media_xaddr = camera.xaddr.clone().ok_or("No XAddr")?; // Assume Media Service is at Device XAddr for simplicity (often true or routed)
+    let user = camera.user.clone().unwrap_or_default();
+    let pass = camera.pass.clone().unwrap_or_default();
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let token = get_profile_token(&client, &media_xaddr, &user, &pass).await?;
+
+    let body = format!(
+        r###"<ContinuousMove xmlns="http://www.onvif.org/ver20/ptz/wsdl">
+      <ProfileToken>{}</ProfileToken>
+      <Velocity>
+        <PanTilt x="{}" y="{}" space="http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace" xmlns="http://www.onvif.org/ver10/schema"/>
+        <Zoom x="{}" space="http://www.onvif.org/ver10/tptz/ZoomSpaces/VelocityGenericSpace" xmlns="http://www.onvif.org/ver10/schema"/>
+      </Velocity>
+    </ContinuousMove>"###,
+        token, x, y, zoom
+    );
+    let envelope = build_soap_envelope(&user, &pass, &body);
+
+    client.post(&ptz_url)
+        .header("Content-Type", "application/soap+xml; charset=utf-8; action=\"http://www.onvif.org/ver20/ptz/wsdl/ContinuousMove\"")
+        .body(envelope)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to ContinuousMove: {}", e))?;
+
+    Ok(())
+}
+
+pub async fn stop_move(camera: &Camera) -> Result<(), String> {
+    let ptz_url = get_ptz_service_url(camera).await?;
+    let media_xaddr = camera.xaddr.clone().ok_or("No XAddr")?;
+    let user = camera.user.clone().unwrap_or_default();
+    let pass = camera.pass.clone().unwrap_or_default();
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let token = get_profile_token(&client, &media_xaddr, &user, &pass).await?;
+
+    let body = format!(
+        r###"<Stop xmlns="http://www.onvif.org/ver20/ptz/wsdl">
+      <ProfileToken>{}</ProfileToken>
+      <PanTilt>true</PanTilt>
+      <Zoom>true</Zoom>
+    </Stop>"###,
+        token
+    );
+    let envelope = build_soap_envelope(&user, &pass, &body);
+
+    client.post(&ptz_url)
+        .header("Content-Type", "application/soap+xml; charset=utf-8; action=\"http://www.onvif.org/ver20/ptz/wsdl/Stop\"")
+        .body(envelope)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to Stop move: {}", e))?;
+
+    Ok(())
+}
+
 fn build_soap_envelope(user: &str, pass: &str, body_content: &str) -> String {
     let security_header = if !user.is_empty() {
         generate_security_header(user, pass)

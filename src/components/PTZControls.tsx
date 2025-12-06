@@ -141,44 +141,37 @@ const PTZControls: React.FC<PTZControlsProps> = ({ cameraId }) => {
       </Box>
 
       {/* Zoom Controls */}
-      <Box sx={{ mt: 3 }}>
-        <Typography variant="body2" gutterBottom>
-          Zoom
-        </Typography>
-        <Stack direction="row" spacing={2} alignItems="center">
-          <IconButton
-            onMouseDown={() => handleMove(0, 0, -0.5, 'zoomOut')}
-            onMouseUp={handleStop}
-            onMouseLeave={handleStop}
-            onTouchStart={() => handleMove(0, 0, -0.5, 'zoomOut')}
-            onTouchEnd={handleStop}
-            sx={buttonStyle('zoomOut')}
-            aria-label="zoom out"
-          >
-            <ZoomOutIcon />
-          </IconButton>
-          <Slider
-            value={zoomLevel}
-            onChange={handleZoomChange}
-            onChangeCommitted={handleZoomCommitted}
-            min={-100}
-            max={100}
-            step={10}
-            valueLabelDisplay="auto"
-            sx={{ flex: 1 }}
-          />
-          <IconButton
-            onMouseDown={() => handleMove(0, 0, 0.5, 'zoomIn')}
-            onMouseUp={handleStop}
-            onMouseLeave={handleStop}
-            onTouchStart={() => handleMove(0, 0, 0.5, 'zoomIn')}
-            onTouchEnd={handleStop}
-            sx={buttonStyle('zoomIn')}
-            aria-label="zoom in"
-          >
-            <ZoomInIcon />
-          </IconButton>
-        </Stack>
+      <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 4 }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <IconButton
+                size="large"
+                onMouseDown={() => handleMove(0, 0, -0.5, 'zoomOut')}
+                onMouseUp={handleStop}
+                onMouseLeave={handleStop}
+                onTouchStart={() => handleMove(0, 0, -0.5, 'zoomOut')}
+                onTouchEnd={handleStop}
+                sx={buttonStyle('zoomOut')}
+                aria-label="zoom out"
+            >
+                <ZoomOutIcon fontSize="large" />
+            </IconButton>
+            <Typography variant="caption">Zoom Out</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <IconButton
+                size="large"
+                onMouseDown={() => handleMove(0, 0, 0.5, 'zoomIn')}
+                onMouseUp={handleStop}
+                onMouseLeave={handleStop}
+                onTouchStart={() => handleMove(0, 0, 0.5, 'zoomIn')}
+                onTouchEnd={handleStop}
+                sx={buttonStyle('zoomIn')}
+                aria-label="zoom in"
+            >
+                <ZoomInIcon fontSize="large" />
+            </IconButton>
+            <Typography variant="caption">Zoom In</Typography>
+        </Box>
       </Box>
     </Paper>
   );
