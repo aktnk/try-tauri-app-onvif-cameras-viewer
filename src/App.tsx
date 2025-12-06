@@ -296,7 +296,7 @@ function App() {
     // For now, let's assume Rust serves it at http://localhost:PORT/recordings/filename
     // I'll make this dynamic later.
     // Actually, `VideoPlayer` might expect a URL.
-    const url = `http://localhost:3001/recordings/${filename}`; // TODO: Fix this port assumption
+    const url = `http://localhost:3333/recordings/${filename}`; // TODO: Fix this port assumption
     setPlayingRecordingUrl(url);
     setIsPlaybackModalOpen(true);
   };

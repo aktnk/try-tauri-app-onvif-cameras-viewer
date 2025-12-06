@@ -115,7 +115,10 @@ pub async fn stop_stream(state: State<'_, AppState>, id: i32) -> Result<serde_js
 
 #[tauri::command]
 pub async fn start_recording(state: State<'_, AppState>, id: i32) -> Result<serde_json::Value, String> {
-    crate::stream::start_recording(state, id).await.map_err(|e| e.to_string())?;
+    let cameras = get_cameras(state.clone()).await?;
+    let camera = cameras.into_iter().find(|c| c.id == id).ok_or("Camera not found")?;
+
+    crate::stream::start_recording(state, camera).await.map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "success": true }))
 }
 
@@ -158,7 +161,20 @@ pub async fn get_recordings(state: State<'_, AppState>) -> Result<Vec<Recording>
 #[tauri::command]
 pub async fn delete_recording(state: State<'_, AppState>, id: i32) -> Result<(), String> {
     let conn = get_conn(&state)?;
-    // TODO: Delete file from filesystem
+    
+    // Get filename to delete
+    let filename: String = conn.query_row(
+        "SELECT filename FROM recordings WHERE id = ?1",
+        [id],
+        |row| row.get(0)
+    ).map_err(|e| e.to_string())?;
+
+    // Delete file from filesystem
+    let file_path = state.recording_dir.join(&filename);
+    if file_path.exists() {
+        std::fs::remove_file(file_path).map_err(|e| e.to_string())?;
+    }
+
     conn.execute("DELETE FROM recordings WHERE id = ?1", [id]).map_err(|e| e.to_string())?;
     Ok(())
 }

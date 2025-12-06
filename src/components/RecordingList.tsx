@@ -59,7 +59,7 @@ const RecordingList: React.FC<RecordingListProps> = ({ listVersion, onPlayRecord
         return <Alert severity="error">{error}</Alert>;
     }
 
-    const BACKEND_URL = 'http://localhost:3001';
+    const BACKEND_URL = 'http://localhost:3333';
 
     return (
         <Box sx={{ mt: 4 }}>

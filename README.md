@@ -5,11 +5,14 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 ## Features
 
 -   **Multi-Camera Type Support**: Manage both ONVIF and RTSP cameras.
-    *   **ONVIF Cameras**: Discover, add, and stream. (PTZ, Time Sync, advanced features are planned/stubbed).
+    *   **ONVIF Cameras**: Discover, add, and stream.
     *   **RTSP Cameras**: Add and stream.
 -   **Camera Discovery**: Automatically discover ONVIF cameras on your local network using **Unicast WS-Discovery** (subnet scanning).
 -   **Camera Management**: Register, update, delete, and list cameras.
--   **Live Streaming**: View live HLS streams from cameras. FFmpeg handles RTSP to HLS transcoding on the backend.
+-   **Live Streaming**: View live HLS streams from cameras. FFmpeg handles RTSP to HLS transcoding (H.264/AAC) on the backend to ensure compatibility with modern browsers.
+-   **Recording**: Record live streams directly to your local disk.
+    *   Safely records to `.ts` format and automatically remuxes to `.mp4` upon completion.
+-   **Playback**: Built-in video player to view your recorded clips.
 -   **Modern UI**: Built with React, Material Design principles, and styled with Tailwind CSS.
 
 ## Technology Stack
@@ -18,14 +21,14 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 *   **Framework**: [React](https://reactjs.org/) with [Vite](https://vitejs.dev/)
 *   **Language**: [TypeScript](https://www.typescriptlang.org/)
 *   **UI Library**: [Material UI (MUI)](https://mui.com/) components with [Tailwind CSS](https://tailwindcss.com/) for styling.
-*   **Video Playback**: [hls.js](https://github.com/video-dev/hls.js)
+*   **Video Playback**: [hls.js](https://github.com/video-dev/hls.js) for live streams, standard HTML5 video for recordings.
 
 ### Backend (Rust - Tauri Core)
 *   **Language**: [Rust](https://www.rust-lang.org/)
 *   **Database**: [SQLite3](https://www.sqlite.org/index.html) with `rusqlite` crate.
-*   **Local Server**: [Axum](https://docs.rs/axum/latest/axum/) for serving HLS streams.
+*   **Local Server**: [Axum](https://docs.rs/axum/latest/axum/) for serving HLS streams and recording files.
 *   **ONVIF Protocol**: Custom SOAP implementation for `GetProfiles` and `GetStreamUri`.
-*   **Video Processing**: [FFmpeg](https://ffmpeg.org/) for RTSP to HLS transcoding (requires system FFmpeg).
+*   **Video Processing**: [FFmpeg](https://ffmpeg.org/) for transcoding and recording (requires system FFmpeg).
 
 ## Getting Started
 
@@ -74,10 +77,10 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
 
 ## Current Status & Known Issues
 
-*   **Discovery**: Unicast ONVIF device discovery is implemented and functional.
-*   **Stream Blackout**: Some users report occasional stream blackouts. This is currently under investigation, potentially related to HLS segment handling or player buffering.
+*   **Discovery**: Unicast ONVIF device discovery is functional.
+*   **Streaming**: Stable. Fixed previous blackout issues by enforcing H.264 transcoding.
+*   **Recording**: Implemented (Start/Stop/Playback).
 *   **PTZ Control**: Not yet implemented.
-*   **Recording**: Not yet implemented.
 *   **Time Synchronization**: Not yet implemented.
 
 ## Contributing
