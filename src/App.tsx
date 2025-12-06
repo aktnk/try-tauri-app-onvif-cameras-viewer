@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { AppBar, Toolbar, Typography, Container, CssBaseline, CircularProgress, Alert, Button, Modal } from '@mui/material';
+import { AppBar, Toolbar, Typography, Container, CssBaseline, CircularProgress, Alert, Button, Modal, Paper } from '@mui/material';
 import CameraList from './components/CameraList';
 import VideoPlayer from './components/VideoPlayer';
 import RecordingList from './components/RecordingList';
@@ -431,7 +431,11 @@ function App() {
                           </div>
                         ) : cameraState.hasPTZ ? (
                           <PTZControls cameraId={cameraId} />
-                        ) : null}
+                        ) : (
+                          <Paper elevation={3} sx={{ p: 3, mt: 2, backgroundColor: '#f9fafb', textAlign: 'center', color: 'text.secondary' }}>
+                             <Typography variant="body2">PTZ Not Available</Typography>
+                          </Paper>
+                        )}
                       </>
                     ) : null}
                   </div>
