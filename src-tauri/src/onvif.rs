@@ -9,8 +9,7 @@ use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use sha1::{Sha1, Digest};
 use base64::prelude::*;
-use rand::Rng;
-use chrono::Utc;
+use chrono::{Utc, Datelike, Timelike};
 
 const ONVIF_PORT: u16 = 3702;
 const PROBE_TIMEOUT_MS: u64 = 2000;
@@ -458,4 +457,182 @@ fn parse_stream_uri(xml: &str) -> Option<String> {
 
     None
 
+}
+
+// --- Time Synchronization Functions ---
+
+#[derive(Debug)]
+pub struct ONVIFDateTime {
+    pub year: i32,
+    pub month: i32,
+    pub day: i32,
+    pub hour: i32,
+    pub minute: i32,
+    pub second: i32,
+}
+
+impl ONVIFDateTime {
+    pub fn from_chrono(dt: &chrono::DateTime<Utc>) -> Self {
+        ONVIFDateTime {
+            year: dt.year(),
+            month: dt.month() as i32,
+            day: dt.day() as i32,
+            hour: dt.hour() as i32,
+            minute: dt.minute() as i32,
+            second: dt.second() as i32,
+        }
+    }
+
+    pub fn to_chrono(&self) -> Option<chrono::DateTime<Utc>> {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(
+            self.year,
+            self.month as u32,
+            self.day as u32,
+            self.hour as u32,
+            self.minute as u32,
+            self.second as u32,
+        ).single()
+    }
+}
+
+pub async fn get_system_date_time(camera: &Camera) -> Result<ONVIFDateTime, String> {
+    let xaddr = camera.xaddr.clone().ok_or("No xAddr available for ONVIF camera")?;
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // GetSystemDateAndTime does not require authentication in ONVIF spec
+    let body = r###"<GetSystemDateAndTime xmlns="http://www.onvif.org/ver10/device/wsdl"/>"###;
+
+    // Use empty credentials for GetSystemDateAndTime (public endpoint)
+    let envelope = build_soap_envelope("", "", body);
+
+    let res = client.post(&xaddr)
+        .header("Content-Type", "application/soap+xml; charset=utf-8; action=\"http://www.onvif.org/ver10/device/wsdl/GetSystemDateAndTime\"")
+        .body(envelope)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to GetSystemDateAndTime: {}", e))?;
+
+    let xml = res.text().await.map_err(|e| e.to_string())?;
+
+    parse_system_date_time(&xml)
+}
+
+fn parse_system_date_time(xml: &str) -> Result<ONVIFDateTime, String> {
+    // Parse UTC DateTime from response
+    // Expected structure: <UTCDateTime><Date><Year>...</Year><Month>...</Month><Day>...</Day></Date><Time>...</Time></UTCDateTime>
+
+    let year_re = Regex::new(r"<[^:]*:?Year>(\d+)</[^:]*:?Year>").map_err(|e| e.to_string())?;
+    let month_re = Regex::new(r"<[^:]*:?Month>(\d+)</[^:]*:?Month>").map_err(|e| e.to_string())?;
+    let day_re = Regex::new(r"<[^:]*:?Day>(\d+)</[^:]*:?Day>").map_err(|e| e.to_string())?;
+    let hour_re = Regex::new(r"<[^:]*:?Hour>(\d+)</[^:]*:?Hour>").map_err(|e| e.to_string())?;
+    let minute_re = Regex::new(r"<[^:]*:?Minute>(\d+)</[^:]*:?Minute>").map_err(|e| e.to_string())?;
+    let second_re = Regex::new(r"<[^:]*:?Second>(\d+)</[^:]*:?Second>").map_err(|e| e.to_string())?;
+
+    let year = year_re.captures(xml)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<i32>().ok())
+        .ok_or("Failed to parse Year")?;
+
+    let month = month_re.captures(xml)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<i32>().ok())
+        .ok_or("Failed to parse Month")?;
+
+    let day = day_re.captures(xml)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<i32>().ok())
+        .ok_or("Failed to parse Day")?;
+
+    let hour = hour_re.captures(xml)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<i32>().ok())
+        .ok_or("Failed to parse Hour")?;
+
+    let minute = minute_re.captures(xml)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<i32>().ok())
+        .ok_or("Failed to parse Minute")?;
+
+    let second = second_re.captures(xml)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<i32>().ok())
+        .ok_or("Failed to parse Second")?;
+
+    Ok(ONVIFDateTime {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+    })
+}
+
+pub async fn set_system_date_time(camera: &Camera, datetime: &ONVIFDateTime) -> Result<(), String> {
+    let xaddr = camera.xaddr.clone().ok_or("No xAddr available for ONVIF camera")?;
+    let user = camera.user.clone().unwrap_or_default();
+    let pass = camera.pass.clone().unwrap_or_default();
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let body = format!(
+        r###"<SetSystemDateAndTime xmlns="http://www.onvif.org/ver10/device/wsdl">
+      <DateTimeType>Manual</DateTimeType>
+      <DaylightSavings>false</DaylightSavings>
+      <TimeZone>
+        <TZ xmlns="http://www.onvif.org/ver10/schema">UTC</TZ>
+      </TimeZone>
+      <UTCDateTime>
+        <Date xmlns="http://www.onvif.org/ver10/schema">
+          <Year>{}</Year>
+          <Month>{}</Month>
+          <Day>{}</Day>
+        </Date>
+        <Time xmlns="http://www.onvif.org/ver10/schema">
+          <Hour>{}</Hour>
+          <Minute>{}</Minute>
+          <Second>{}</Second>
+        </Time>
+      </UTCDateTime>
+    </SetSystemDateAndTime>"###,
+        datetime.year, datetime.month, datetime.day,
+        datetime.hour, datetime.minute, datetime.second
+    );
+
+    let envelope = build_soap_envelope(&user, &pass, &body);
+
+    let res = client.post(&xaddr)
+        .header("Content-Type", "application/soap+xml; charset=utf-8; action=\"http://www.onvif.org/ver10/device/wsdl/SetSystemDateAndTime\"")
+        .body(envelope)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to SetSystemDateAndTime: {}", e))?;
+
+    let status = res.status();
+    let response_text = res.text().await.map_err(|e| e.to_string())?;
+
+    println!("[ONVIF] SetSystemDateAndTime response status: {}", status);
+    println!("[ONVIF] SetSystemDateAndTime response body: {}", response_text);
+
+    if !status.is_success() {
+        return Err(format!("SetSystemDateAndTime failed with status {}: {}", status, response_text));
+    }
+
+    // Check for SOAP fault
+    if response_text.contains("Fault") || response_text.contains("fault") {
+        return Err(format!("SOAP Fault returned: {}", response_text));
+    }
+
+    println!("[ONVIF] SetSystemDateAndTime succeeded");
+    Ok(())
 }

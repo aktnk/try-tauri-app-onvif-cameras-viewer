@@ -179,15 +179,102 @@ pub async fn delete_recording(state: State<'_, AppState>, id: i32) -> Result<(),
     Ok(())
 }
 
-// Time and PTZ stubs
+// Time synchronization commands
 #[tauri::command]
-pub async fn get_camera_time(id: i32) -> Result<CameraTimeInfo, String> {
-    Err("Not implemented".to_string())
+pub async fn get_camera_time(state: State<'_, AppState>, id: i32) -> Result<CameraTimeInfo, String> {
+    let cameras = get_cameras(state.clone()).await?;
+    let camera = cameras.into_iter().find(|c| c.id == id).ok_or("Camera not found")?;
+
+    if camera.camera_type != "onvif" {
+        return Err("Time synchronization is only supported for ONVIF cameras".to_string());
+    }
+
+    let camera_datetime = crate::onvif::get_system_date_time(&camera).await?;
+    let server_time = Utc::now();
+
+    Ok(CameraTimeInfo {
+        cameraTime: serde_json::json!({
+            "year": camera_datetime.year,
+            "month": camera_datetime.month,
+            "day": camera_datetime.day,
+            "hour": camera_datetime.hour,
+            "minute": camera_datetime.minute,
+            "second": camera_datetime.second,
+        }),
+        serverTime: server_time.to_rfc3339(),
+    })
 }
 
 #[tauri::command]
-pub async fn sync_camera_time(id: i32) -> Result<TimeSyncResult, String> {
-    Err("Not implemented".to_string())
+pub async fn sync_camera_time(state: State<'_, AppState>, id: i32) -> Result<TimeSyncResult, String> {
+    let cameras = get_cameras(state.clone()).await?;
+    let camera = cameras.into_iter().find(|c| c.id == id).ok_or("Camera not found")?;
+
+    if camera.camera_type != "onvif" {
+        return Err("Time synchronization is only supported for ONVIF cameras".to_string());
+    }
+
+    // Get current camera time before sync
+    let before_datetime = crate::onvif::get_system_date_time(&camera).await?;
+
+    // Get server time
+    let server_time = Utc::now();
+
+    // Convert server time to ONVIF format
+    let new_datetime = crate::onvif::ONVIFDateTime::from_chrono(&server_time);
+
+    // Set camera time
+    crate::onvif::set_system_date_time(&camera, &new_datetime).await?;
+
+    // Wait a moment for the camera to process the time change
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Verify by reading the time again
+    let after_datetime = match crate::onvif::get_system_date_time(&camera).await {
+        Ok(dt) => Some(dt),
+        Err(e) => {
+            println!("[TimeSync] Warning: Could not verify time after sync: {}", e);
+            None
+        }
+    };
+
+    // Calculate time difference
+    let before_chrono = before_datetime.to_chrono().ok_or("Invalid camera time format")?;
+    let time_diff = server_time.signed_duration_since(before_chrono);
+    let diff_seconds = time_diff.num_seconds();
+
+    // Check if verification shows the time was actually set
+    let message = if let Some(after_dt) = after_datetime {
+        let after_chrono = after_dt.to_chrono().ok_or("Invalid camera time format")?;
+        let final_diff = Utc::now().signed_duration_since(after_chrono).num_seconds();
+
+        if final_diff.abs() < 5 {
+            format!("Camera time synchronized successfully (adjusted by {}s, verified)", diff_seconds)
+        } else {
+            format!("Camera time may not have been set correctly (before diff: {}s, after diff: {}s)", diff_seconds, final_diff)
+        }
+    } else if diff_seconds.abs() < 2 {
+        format!("Camera time is already synchronized (difference: {}s)", diff_seconds)
+    } else {
+        format!("Camera time command sent (adjusted by {}s, verification unavailable)", diff_seconds)
+    };
+
+    println!("[TimeSync] Camera {} - {}", id, message);
+
+    Ok(TimeSyncResult {
+        success: true,
+        beforeTime: serde_json::json!({
+            "year": before_datetime.year,
+            "month": before_datetime.month,
+            "day": before_datetime.day,
+            "hour": before_datetime.hour,
+            "minute": before_datetime.minute,
+            "second": before_datetime.second,
+        }),
+        serverTime: server_time.to_rfc3339(),
+        message,
+        error: None,
+    })
 }
 
 #[tauri::command]
