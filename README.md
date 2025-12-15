@@ -16,6 +16,10 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 -   **PTZ Control**: Control Pan, Tilt, and Zoom for supported ONVIF cameras directly from the application.
     *   Includes intuitive UI for continuous movement controls.
     *   Displays status for non-PTZ cameras.
+-   **Time Synchronization**: Synchronize ONVIF camera time with server time.
+    *   Automatic sync when adding new cameras.
+    *   Manual sync via UI button for existing cameras.
+    *   Displays time difference information.
 -   **Modern UI**: Built with React, Material Design principles, and styled with Tailwind CSS.
 
 ## Technology Stack
@@ -30,7 +34,7 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 *   **Language**: [Rust](https://www.rust-lang.org/)
 *   **Database**: [SQLite3](https://www.sqlite.org/index.html) with `rusqlite` crate.
 *   **Local Server**: [Axum](https://docs.rs/axum/latest/axum/) for serving HLS streams and recording files.
-*   **ONVIF Protocol**: Custom SOAP implementation for `GetProfiles`, `GetStreamUri`, and PTZ (`ContinuousMove`, `Stop`).
+*   **ONVIF Protocol**: Custom SOAP implementation for `GetProfiles`, `GetStreamUri`, PTZ (`ContinuousMove`, `Stop`), and Time Sync (`GetSystemDateAndTime`, `SetSystemDateAndTime`).
 *   **Video Processing**: [FFmpeg](https://ffmpeg.org/) for transcoding and recording (requires system FFmpeg).
 
 ## Getting Started
@@ -84,7 +88,7 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
 *   **Streaming**: Stable. Transcoding to H.264 ensures wide compatibility.
 *   **Recording**: Fully functional (Record/Stop/Play).
 *   **PTZ Control**: Implemented (Pan/Tilt/Zoom with UI feedback).
-*   **Time Synchronization**: Not yet implemented.
+*   **Time Synchronization**: Fully implemented (GetSystemDateAndTime/SetSystemDateAndTime).
 
 ## Contributing
 
