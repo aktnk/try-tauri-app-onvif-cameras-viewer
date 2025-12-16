@@ -12,7 +12,8 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 -   **Live Streaming**: View live HLS streams from cameras. FFmpeg handles RTSP to HLS transcoding (H.264/AAC) on the backend to ensure compatibility with modern browsers.
 -   **Recording**: Record live streams directly to your local disk.
     *   Safely records to `.ts` format and automatically remuxes to `.mp4` upon completion.
--   **Playback**: Built-in video player to view your recorded clips.
+    *   **Automatic Thumbnails**: Generates thumbnails from recorded videos for easy preview.
+-   **Playback**: Built-in video player to view your recorded clips with thumbnail previews.
 -   **PTZ Control**: Control Pan, Tilt, and Zoom for supported ONVIF cameras directly from the application.
     *   Includes intuitive UI for continuous movement controls.
     *   Displays status for non-PTZ cameras.
@@ -35,7 +36,7 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 *   **Database**: [SQLite3](https://www.sqlite.org/index.html) with `rusqlite` crate.
 *   **Local Server**: [Axum](https://docs.rs/axum/latest/axum/) for serving HLS streams and recording files.
 *   **ONVIF Protocol**: Custom SOAP implementation for `GetProfiles`, `GetStreamUri`, PTZ (`ContinuousMove`, `Stop`), and Time Sync (`GetSystemDateAndTime`, `SetSystemDateAndTime`).
-*   **Video Processing**: [FFmpeg](https://ffmpeg.org/) for transcoding and recording (requires system FFmpeg).
+*   **Video Processing**: [FFmpeg](https://ffmpeg.org/) for transcoding, recording, and thumbnail generation (requires system FFmpeg).
 
 ## Getting Started
 
@@ -86,7 +87,7 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
 
 *   **Discovery**: Unicast ONVIF device discovery is functional.
 *   **Streaming**: Stable. Transcoding to H.264 ensures wide compatibility.
-*   **Recording**: Fully functional (Record/Stop/Play).
+*   **Recording**: Fully functional (Record/Stop/Play with automatic thumbnail generation).
 *   **PTZ Control**: Implemented (Pan/Tilt/Zoom with UI feedback).
 *   **Time Synchronization**: Fully implemented (GetSystemDateAndTime/SetSystemDateAndTime).
 
