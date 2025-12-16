@@ -3,6 +3,7 @@ use crate::AppState;
 use std::process::{Command, Stdio};
 use tauri::State;
 use std::fs;
+use std::path::PathBuf;
 use rusqlite::Connection;
 use chrono::Utc;
 
@@ -193,10 +194,29 @@ pub async fn stop_recording(state: State<'_, AppState>, id: i32) -> Result<(), S
              // Remove temp file
              let _ = fs::remove_file(temp_path);
 
+             // Generate thumbnail
+             let thumbnail_filename = final_filename.replace(".mp4", ".jpg");
+             let thumbnail_path = state.recording_dir.join("thumbnails").join(&thumbnail_filename);
+
+             // Ensure thumbnails directory exists
+             if let Some(parent) = thumbnail_path.parent() {
+                 fs::create_dir_all(parent).map_err(|e| format!("Failed to create thumbnails directory: {}", e))?;
+             }
+
+             // Try to generate thumbnail (non-fatal if it fails)
+             let thumbnail_result = generate_thumbnail(&final_path, &thumbnail_path);
+             let thumbnail_db_value = match thumbnail_result {
+                 Ok(_) => Some(thumbnail_filename),
+                 Err(e) => {
+                     println!("[Thumbnail] Warning: Failed to generate thumbnail: {}", e);
+                     None
+                 }
+             };
+
              // Update DB
              conn.execute(
-                "UPDATE recordings SET is_finished = 1, filename = ?1, end_time = ?2 WHERE id = ?3",
-                (&final_filename, Utc::now().to_rfc3339(), rec_id)
+                "UPDATE recordings SET is_finished = 1, filename = ?1, thumbnail = ?2, end_time = ?3 WHERE id = ?4",
+                (&final_filename, thumbnail_db_value, Utc::now().to_rfc3339(), rec_id)
              ).map_err(|e| e.to_string())?;
         } else {
             // Temp file missing?
@@ -222,7 +242,7 @@ async fn get_rtsp_url(camera: &Camera) -> Result<String, String> {
              // Default fallback for RTSP if no path? Should probably error or assume root
             format!("rtsp://{}:{}/", camera.host, camera.port)
         };
-        
+
         if let (Some(user), Some(pass)) = (&camera.user, &camera.pass) {
             if !user.is_empty() {
                  Ok(base_url.replace("rtsp://", &format!("rtsp://{}:{}@", user, urlencoding::encode(pass))))
@@ -233,5 +253,33 @@ async fn get_rtsp_url(camera: &Camera) -> Result<String, String> {
             Ok(base_url)
         }
     }
+}
+
+// Generate thumbnail from video file using FFmpeg
+fn generate_thumbnail(video_path: &PathBuf, thumbnail_path: &PathBuf) -> Result<(), String> {
+    println!("[Thumbnail] Generating thumbnail from {:?} to {:?}", video_path, thumbnail_path);
+
+    // FFmpeg command: extract frame at 2 seconds, scale to 320px width, high quality
+    let output = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-ss", "00:00:02",
+            "-i", video_path.to_str().unwrap(),
+            "-vframes", "1",
+            "-vf", "scale=320:-1",
+            "-q:v", "2",
+            thumbnail_path.to_str().unwrap()
+        ])
+        .output()
+        .map_err(|e| format!("Failed to spawn FFmpeg for thumbnail: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        println!("[Thumbnail] FFmpeg failed: {}", stderr);
+        return Err(format!("FFmpeg thumbnail generation failed: {}", stderr));
+    }
+
+    println!("[Thumbnail] Successfully generated thumbnail");
+    Ok(())
 }
 

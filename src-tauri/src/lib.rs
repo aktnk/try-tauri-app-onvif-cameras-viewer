@@ -26,7 +26,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let app_handle = app.handle();
+            let _app_handle = app.handle();
             let app_dir = app.path().app_data_dir().expect("failed to get app data dir");
             std::fs::create_dir_all(&app_dir).expect("failed to create app data dir");
             
@@ -42,6 +42,9 @@ pub fn run() {
 
             let recording_dir = app_dir.join("recordings");
             std::fs::create_dir_all(&recording_dir).expect("failed to create recordings dir");
+
+            let thumbnails_dir = recording_dir.join("thumbnails");
+            std::fs::create_dir_all(&thumbnails_dir).expect("failed to create thumbnails dir");
 
             let state = AppState {
                 db_path: db_path.to_string_lossy().to_string(),
