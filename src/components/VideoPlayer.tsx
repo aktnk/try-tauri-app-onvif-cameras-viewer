@@ -17,9 +17,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ streamUrl }) => {
       // hls.js is used for most browsers
       if (Hls.isSupported()) {
         const hlsConfig = {
-          // Give HLS.js more time to fetch the manifest if it's not ready
+          // Manifest loading retry settings
           manifestLoadingMaxRetry: 9,
           manifestLoadingRetryDelay: 1000,
+
+          // Low latency live streaming optimizations
+          liveSyncDurationCount: 3,        // Keep close to live edge (3 segments)
+          liveMaxLatencyDurationCount: 10, // Max latency before seeking back to live
+          maxBufferLength: 30,             // Max buffer size in seconds (increased to match FFmpeg)
+          maxMaxBufferLength: 60,          // Absolute max buffer (increased)
+          maxBufferSize: 60 * 1000 * 1000, // 60 MB max buffer size (increased)
+
+          // Improve segment loading for live streams
+          manifestLoadingTimeOut: 10000,
+          levelLoadingTimeOut: 10000,
+          fragLoadingTimeOut: 20000,
+
+          // Low latency mode
+          backBufferLength: 60,            // Keep 60 seconds of back buffer (increased)
         };
         hls = new Hls(hlsConfig);
         hls.loadSource(streamUrl);
@@ -29,6 +44,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ streamUrl }) => {
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
             console.error("HLS Error:", event, data);
+            // Auto-recover from non-fatal errors
+            if (data.fatal) {
+              switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                  console.log("Network error, trying to recover...");
+                  hls?.startLoad();
+                  break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                  console.log("Media error, trying to recover...");
+                  hls?.recoverMediaError();
+                  break;
+                default:
+                  console.error("Fatal error, cannot recover");
+                  hls?.destroy();
+                  break;
+              }
+            }
         });
       } 
       // Native HLS support in Safari

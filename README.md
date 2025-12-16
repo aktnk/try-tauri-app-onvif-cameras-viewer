@@ -86,10 +86,14 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
 ## Current Status & Known Issues
 
 *   **Discovery**: Unicast ONVIF device discovery is functional.
-*   **Streaming**: Stable. Transcoding to H.264 ensures wide compatibility.
+*   **Streaming**: Optimized for low-latency with proper keyframe handling. Supports up to 4 simultaneous camera streams.
+    *   HLS.js configured for 30-second buffer with automatic error recovery.
+    *   FFmpeg re-encodes with libx264 (ultrafast preset) to ensure proper segment boundaries.
+    *   Keyframes forced every 2 seconds to prevent buffer holes.
 *   **Recording**: Fully functional (Record/Stop/Play with automatic thumbnail generation).
 *   **PTZ Control**: Implemented (Pan/Tilt/Zoom with UI feedback).
 *   **Time Synchronization**: Fully implemented (GetSystemDateAndTime/SetSystemDateAndTime).
+*   **Performance**: CPU-based encoding. GPU acceleration (NVENC/VAAPI) can be implemented for improved multi-camera performance.
 
 ## Contributing
 

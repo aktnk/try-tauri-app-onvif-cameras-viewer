@@ -37,22 +37,31 @@ pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<
     println!("Starting FFmpeg for camera {}: {}", id, rtsp_url);
 
     // Spawn FFmpeg
-    // Matches reference implementation:
-    // -rtsp_transport tcp -i [URL] -c:v copy -an -f hls ...
+    // Optimized for stable low-latency live streaming with proper keyframe handling:
+    // - Re-encode with libx264 to ensure proper keyframes at segment boundaries
+    // - Force keyframe every 2 seconds to match segment boundaries
+    // - Balanced playlist size (15 segments = 30 seconds) to match HLS.js buffer
+    // - Controlled segment deletion to prevent buffer holes
     let child = Command::new("ffmpeg")
         .args([
             "-y",
             "-fflags", "nobuffer",
             "-rtsp_transport", "tcp",
             "-i", &rtsp_url,
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-tune", "zerolatency",
+            "-c:v", "libx264",             // Re-encode to ensure proper keyframes
+            "-preset", "ultrafast",        // Fastest encoding preset
+            "-tune", "zerolatency",        // Optimize for low latency
+            "-g", "60",                    // Keyframe every 60 frames (~2s at 30fps)
+            "-keyint_min", "60",           // Minimum keyframe interval
+            "-sc_threshold", "0",          // Disable scene change detection
+            "-force_key_frames", "expr:gte(t,n_forced*2)", // Force keyframe every 2 seconds
             "-an", // Disable audio for stability/latency per reference
             "-f", "hls",
-            "-hls_time", "2",
-            "-hls_list_size", "3",
-            "-hls_flags", "delete_segments+omit_endlist",
+            "-hls_time", "2",              // 2 second segments to align with keyframes
+            "-hls_list_size", "15",        // Keep 15 segments (30 seconds buffer) to match HLS.js maxBufferLength
+            "-hls_delete_threshold", "3",  // Delete segments only after 3 newer segments exist
+            "-hls_flags", "delete_segments+omit_endlist+program_date_time",
+            "-hls_segment_type", "mpegts", // Explicitly use MPEG-TS format
             "-hls_segment_filename", segment_filename.to_str().unwrap(),
             output_file.to_str().unwrap()
         ])
