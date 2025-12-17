@@ -214,6 +214,12 @@ pub async fn sync_camera_time(state: State<'_, AppState>, id: i32) -> Result<Tim
         return Err("Time synchronization is only supported for ONVIF cameras".to_string());
     }
 
+    // Check if streaming is currently active
+    let was_streaming = {
+        let processes = state.processes.lock().map_err(|e| e.to_string())?;
+        processes.contains_key(&id)
+    };
+
     // Get current camera time before sync
     let before_datetime = crate::onvif::get_system_date_time(&camera).await?;
 
@@ -237,6 +243,26 @@ pub async fn sync_camera_time(state: State<'_, AppState>, id: i32) -> Result<Tim
             None
         }
     };
+
+    // Restart streaming if it was active before time sync
+    if was_streaming {
+        println!("[TimeSync] Restarting stream for camera {} after time sync", id);
+
+        // Stop current stream
+        if let Err(e) = crate::stream::stop_stream(state.clone(), id).await {
+            println!("[TimeSync] Warning: Failed to stop stream: {}", e);
+        }
+
+        // Wait for cleanup
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // Restart stream
+        if let Err(e) = crate::stream::start_stream(state.clone(), camera.clone()).await {
+            println!("[TimeSync] Warning: Failed to restart stream: {}", e);
+        } else {
+            println!("[TimeSync] Stream restarted successfully for camera {}", id);
+        }
+    }
 
     // Calculate time difference
     let before_chrono = before_datetime.to_chrono().ok_or("Invalid camera time format")?;

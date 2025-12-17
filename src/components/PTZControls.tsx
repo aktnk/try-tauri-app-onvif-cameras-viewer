@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, IconButton, Typography, Paper, Slider, Stack } from '@mui/material';
+import { Box, IconButton, Typography, Paper } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -14,7 +14,6 @@ interface PTZControlsProps {
 
 const PTZControls: React.FC<PTZControlsProps> = ({ cameraId }) => {
   const [activeButton, setActiveButton] = useState<string | null>(null);
-  const [zoomLevel, setZoomLevel] = useState<number>(0);
 
   console.log('[PTZControls] Rendering PTZ controls for camera:', cameraId);
 
@@ -36,26 +35,6 @@ const PTZControls: React.FC<PTZControlsProps> = ({ cameraId }) => {
       await stopPTZ(cameraId);
     } catch (error) {
       console.error('Failed to stop PTZ:', error);
-    }
-  };
-
-  const handleZoomChange = async (_event: Event, newValue: number | number[]) => {
-    const zoom = newValue as number;
-    setZoomLevel(zoom);
-    try {
-      await movePTZ(cameraId, { x: 0, y: 0, zoom: zoom / 100 });
-    } catch (error) {
-      console.error('Failed to zoom:', error);
-    }
-  };
-
-  const handleZoomCommitted = async () => {
-    // Stop zoom when user releases the slider
-    setZoomLevel(0);
-    try {
-      await stopPTZ(cameraId);
-    } catch (error) {
-      console.error('Failed to stop zoom:', error);
     }
   };
 
