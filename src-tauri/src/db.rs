@@ -1,6 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::path::Path;
 use std::fs;
+use crate::gpu_detector;
 
 pub fn init_db<P: AsRef<Path>>(path: P) -> Result<()> {
     if let Some(parent) = path.as_ref().parent() {
@@ -39,6 +40,54 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> Result<()> {
         )",
         [],
     )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS encoder_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            encoder_mode TEXT NOT NULL DEFAULT 'Auto',
+            gpu_encoder TEXT,
+            cpu_encoder TEXT NOT NULL DEFAULT 'libx264',
+            preset TEXT NOT NULL DEFAULT 'ultrafast',
+            quality INTEGER NOT NULL DEFAULT 23
+        )",
+        [],
+    )?;
+
+    // Insert default encoder settings if not exists
+    conn.execute(
+        "INSERT OR IGNORE INTO encoder_settings (id, encoder_mode, gpu_encoder, cpu_encoder, preset, quality)
+         VALUES (1, 'Auto', NULL, 'libx264', 'ultrafast', 23)",
+        [],
+    )?;
+
+    Ok(())
+}
+
+/// Initialize GPU encoder settings by detecting available hardware
+pub async fn init_gpu_encoder_settings<P: AsRef<Path>>(path: P) -> Result<(), String> {
+    println!("[Init] Initializing GPU encoder settings...");
+
+    // Detect GPU capabilities
+    let capabilities = gpu_detector::detect_gpu_capabilities().await
+        .map_err(|e| format!("Failed to detect GPU: {}", e))?;
+
+    // Only update if a preferred encoder was found
+    if let Some(preferred_encoder) = capabilities.preferredEncoder {
+        println!("[Init] Found GPU encoder: {}", preferred_encoder);
+
+        let conn = Connection::open(path)
+            .map_err(|e| format!("Failed to open database: {}", e))?;
+
+        // Update the encoder settings only if gpu_encoder is NULL
+        conn.execute(
+            "UPDATE encoder_settings SET gpu_encoder = ?1 WHERE id = 1 AND gpu_encoder IS NULL",
+            [&preferred_encoder],
+        ).map_err(|e| format!("Failed to update encoder settings: {}", e))?;
+
+        println!("[Init] GPU encoder settings initialized: {}", preferred_encoder);
+    } else {
+        println!("[Init] No GPU encoder found, keeping CPU-only mode");
+    }
 
     Ok(())
 }

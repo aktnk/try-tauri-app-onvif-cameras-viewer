@@ -112,3 +112,38 @@ pub struct CameraCapabilities {
     pub timeSync: bool,
     pub remoteAccess: bool,
 }
+
+// Encoder Settings
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncoderSettings {
+    pub id: i32,
+    pub encoderMode: String,        // "Auto", "GpuOnly", "CpuOnly"
+    pub gpuEncoder: Option<String>,  // "h264_nvenc", "h264_qsv", etc.
+    pub cpuEncoder: String,          // "libx264" (fallback)
+    pub preset: String,              // "ultrafast", "fast", "medium"
+    pub quality: i32,                // CRF/CQ value (18-28)
+}
+
+impl Default for EncoderSettings {
+    fn default() -> Self {
+        EncoderSettings {
+            id: 1,
+            encoderMode: "Auto".to_string(),
+            gpuEncoder: None,
+            cpuEncoder: "libx264".to_string(),
+            preset: "ultrafast".to_string(),
+            quality: 23,
+        }
+    }
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateEncoderSettings {
+    pub encoderMode: Option<String>,
+    pub gpuEncoder: Option<String>,
+    pub cpuEncoder: Option<String>,
+    pub preset: Option<String>,
+    pub quality: Option<i32>,
+}

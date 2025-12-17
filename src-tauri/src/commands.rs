@@ -1,9 +1,9 @@
 use tauri::State;
-use crate::models::{Camera, NewCamera, Recording, DiscoveredDevice, PTZCapabilities, PTZMovement, PTZResult, CameraTimeInfo, TimeSyncResult, CameraCapabilities};
+use crate::models::{Camera, NewCamera, Recording, DiscoveredDevice, PTZCapabilities, PTZMovement, PTZResult, CameraTimeInfo, TimeSyncResult, CameraCapabilities, EncoderSettings, UpdateEncoderSettings};
 use crate::AppState;
+use crate::gpu_detector::{detect_gpu_capabilities, GpuCapabilities};
 use rusqlite::Connection;
 use chrono::{Utc, DateTime};
-use std::str::FromStr;
 
 fn get_conn(state: &State<AppState>) -> Result<Connection, String> {
     Connection::open(&state.db_path).map_err(|e| e.to_string())
@@ -326,7 +326,7 @@ pub async fn stop_ptz(state: State<'_, AppState>, id: i32) -> Result<PTZResult, 
 }
 
 #[tauri::command]
-pub async fn get_camera_capabilities(id: i32) -> Result<CameraCapabilities, String> {
+pub async fn get_camera_capabilities(_id: i32) -> Result<CameraCapabilities, String> {
      Ok(CameraCapabilities {
         streaming: true,
         recording: true,
@@ -336,4 +336,78 @@ pub async fn get_camera_capabilities(id: i32) -> Result<CameraCapabilities, Stri
         timeSync: false,
         remoteAccess: false,
     })
+}
+
+// ============= GPU & Encoder Commands =============
+
+#[tauri::command]
+pub async fn detect_gpu() -> Result<GpuCapabilities, String> {
+    println!("[GPU] Detecting GPU capabilities...");
+    detect_gpu_capabilities().await
+}
+
+#[tauri::command]
+pub async fn get_encoder_settings(state: State<'_, AppState>) -> Result<EncoderSettings, String> {
+    let conn = get_conn(&state)?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, encoder_mode, gpu_encoder, cpu_encoder, preset, quality FROM encoder_settings WHERE id = 1"
+    ).map_err(|e| e.to_string())?;
+
+    let settings = stmt.query_row([], |row| {
+        Ok(EncoderSettings {
+            id: row.get(0)?,
+            encoderMode: row.get(1)?,
+            gpuEncoder: row.get(2)?,
+            cpuEncoder: row.get(3)?,
+            preset: row.get(4)?,
+            quality: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    Ok(settings)
+}
+
+#[tauri::command]
+pub async fn update_encoder_settings(
+    state: State<'_, AppState>,
+    settings: UpdateEncoderSettings,
+) -> Result<EncoderSettings, String> {
+    let conn = get_conn(&state)?;
+
+    // Use separate UPDATE statements for each field
+    if let Some(mode) = &settings.encoderMode {
+        conn.execute("UPDATE encoder_settings SET encoder_mode = ?1 WHERE id = 1", [mode])
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(gpu_enc) = &settings.gpuEncoder {
+        conn.execute("UPDATE encoder_settings SET gpu_encoder = ?1 WHERE id = 1", [gpu_enc])
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(cpu_enc) = &settings.cpuEncoder {
+        conn.execute("UPDATE encoder_settings SET cpu_encoder = ?1 WHERE id = 1", [cpu_enc])
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(p) = &settings.preset {
+        conn.execute("UPDATE encoder_settings SET preset = ?1 WHERE id = 1", [p])
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(q) = settings.quality {
+        conn.execute("UPDATE encoder_settings SET quality = ?1 WHERE id = 1", [q])
+            .map_err(|e| e.to_string())?;
+    }
+
+    if settings.encoderMode.is_none()
+        && settings.gpuEncoder.is_none()
+        && settings.cpuEncoder.is_none()
+        && settings.preset.is_none()
+        && settings.quality.is_none() {
+        return Err("No fields to update".to_string());
+    }
+
+    // Drop connection before await
+    drop(conn);
+
+    // Return updated settings
+    get_encoder_settings(state).await
 }

@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { AppBar, Toolbar, Typography, Container, CssBaseline, CircularProgress, Alert, Button, Modal, Paper } from '@mui/material';
+import { AppBar, Toolbar, Typography, Container, CssBaseline, CircularProgress, Alert, Button, Modal, Paper, IconButton } from '@mui/material';
+import SettingsIcon from '@mui/icons-material/Settings';
 import CameraList from './components/CameraList';
 import VideoPlayer from './components/VideoPlayer';
 import RecordingList from './components/RecordingList';
 import AddCameraModal from './components/AddCameraModal';
 import DiscoverCamerasModal from './components/DiscoverCamerasModal';
 import PTZControls from './components/PTZControls';
+import EncoderSettings from './components/EncoderSettings';
 import { getCameras, startStream, stopStream, startRecording, stopRecording, checkPTZCapabilities } from './services/api';
 import type { Camera } from './services/api';
 
@@ -63,6 +65,7 @@ function App() {
 
   const [isAddCameraModalOpen, setIsAddCameraModalOpen] = useState(false);
   const [isDiscoverModalOpen, setIsDiscoverModalOpen] = useState(false);
+  const [isEncoderSettingsOpen, setIsEncoderSettingsOpen] = useState(false);
 
   const [recordingListVersion, setRecordingListVersion] = useState(0);
 
@@ -334,6 +337,13 @@ function App() {
           <Typography variant="h6" component="div" className="flex-grow font-semibold">
             ONVIF Camera Viewer (Tauri)
           </Typography>
+          <IconButton
+            color="inherit"
+            onClick={() => setIsEncoderSettingsOpen(true)}
+            title="Encoder Settings"
+          >
+            <SettingsIcon />
+          </IconButton>
         </Toolbar>
       </AppBar>
       <main>
@@ -470,6 +480,10 @@ function App() {
           )}
         </div>
       </Modal>
+      <EncoderSettings
+        open={isEncoderSettingsOpen}
+        onClose={() => setIsEncoderSettingsOpen(false)}
+      />
     </div>
   );
 }
