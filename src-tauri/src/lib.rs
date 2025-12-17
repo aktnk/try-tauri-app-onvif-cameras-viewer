@@ -3,6 +3,8 @@ pub mod models;
 pub mod commands;
 pub mod stream;
 pub mod onvif;
+pub mod gpu_detector;
+pub mod encoder;
 
 use tauri::Manager;
 use std::path::PathBuf;
@@ -32,6 +34,14 @@ pub fn run() {
             
             let db_path = app_dir.join("cameras.db");
             db::init_db(&db_path).expect("failed to init db");
+
+            // Initialize GPU encoder settings after DB is created
+            let db_path_clone = db_path.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = db::init_gpu_encoder_settings(&db_path_clone).await {
+                    eprintln!("[Init] Failed to initialize GPU encoder settings: {}", e);
+                }
+            });
 
             let stream_dir = app_dir.join("streams");
             // Clear old streams on startup
@@ -92,7 +102,10 @@ pub fn run() {
             commands::check_ptz_capabilities,
             commands::move_ptz,
             commands::stop_ptz,
-            commands::get_camera_capabilities
+            commands::get_camera_capabilities,
+            commands::detect_gpu,
+            commands::get_encoder_settings,
+            commands::update_encoder_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

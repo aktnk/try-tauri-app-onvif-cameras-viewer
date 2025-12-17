@@ -1,5 +1,7 @@
-use crate::models::Camera;
+use crate::models::{Camera, EncoderSettings};
 use crate::AppState;
+use crate::gpu_detector::detect_gpu_capabilities;
+use crate::encoder::EncoderSelector;
 use std::process::{Command, Stdio};
 use tauri::State;
 use std::fs;
@@ -12,9 +14,39 @@ fn get_conn(state: &State<AppState>) -> Result<Connection, String> {
     Connection::open(&state.db_path).map_err(|e| e.to_string())
 }
 
+// Get encoder settings from database
+async fn get_encoder_settings(state: &State<'_, AppState>) -> Result<EncoderSettings, String> {
+    let conn = get_conn(state)?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, encoder_mode, gpu_encoder, cpu_encoder, preset, quality FROM encoder_settings WHERE id = 1"
+    ).map_err(|e| e.to_string())?;
+
+    let settings = stmt.query_row([], |row| {
+        Ok(EncoderSettings {
+            id: row.get(0)?,
+            encoderMode: row.get(1)?,
+            gpuEncoder: row.get(2)?,
+            cpuEncoder: row.get(3)?,
+            preset: row.get(4)?,
+            quality: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    Ok(settings)
+}
+
+// Build encoder selector
+async fn build_encoder_selector(state: &State<'_, AppState>) -> Result<EncoderSelector, String> {
+    let capabilities = detect_gpu_capabilities().await?;
+    let settings = get_encoder_settings(state).await?;
+
+    Ok(EncoderSelector::new(capabilities, settings))
+}
+
 pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<String, String> {
     let id = camera.id;
-    
+
     // Check if already running
     {
         let processes = state.processes.lock().map_err(|e| e.to_string())?;
@@ -34,39 +66,43 @@ pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<
     let output_file = stream_dir.join("index.m3u8");
     let segment_filename = stream_dir.join("segment_%03d.ts");
 
-    println!("Starting FFmpeg for camera {}: {}", id, rtsp_url);
+    println!("[Stream] Starting FFmpeg for camera {}: {}", id, rtsp_url);
+
+    // Get encoder configuration
+    let encoder_selector = build_encoder_selector(&state).await?;
+    let encoder_config = encoder_selector.select_encoder_for_streaming().await;
+
+    println!("[Stream] Using encoder: {} (GPU: {})", encoder_config.codec, encoder_config.is_gpu);
+
+    // Build FFmpeg command
+    let mut args = vec![
+        "-y".to_string(),
+        "-fflags".to_string(), "nobuffer".to_string(),
+        "-rtsp_transport".to_string(), "tcp".to_string(),
+        "-i".to_string(), rtsp_url.clone(),
+    ];
+
+    // Add encoder-specific arguments
+    args.extend(encoder_config.args);
+
+    // Add common streaming arguments
+    args.extend_from_slice(&[
+        "-an".to_string(), // Disable audio for stability/latency
+        "-f".to_string(), "hls".to_string(),
+        "-hls_time".to_string(), "2".to_string(),
+        "-hls_list_size".to_string(), "15".to_string(),
+        "-hls_delete_threshold".to_string(), "3".to_string(),
+        "-hls_flags".to_string(), "delete_segments+omit_endlist+program_date_time".to_string(),
+        "-hls_segment_type".to_string(), "mpegts".to_string(),
+        "-hls_segment_filename".to_string(), segment_filename.to_str().unwrap().to_string(),
+        output_file.to_str().unwrap().to_string(),
+    ]);
 
     // Spawn FFmpeg
-    // Optimized for stable low-latency live streaming with proper keyframe handling:
-    // - Re-encode with libx264 to ensure proper keyframes at segment boundaries
-    // - Force keyframe every 2 seconds to match segment boundaries
-    // - Balanced playlist size (15 segments = 30 seconds) to match HLS.js buffer
-    // - Controlled segment deletion to prevent buffer holes
     let child = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-fflags", "nobuffer",
-            "-rtsp_transport", "tcp",
-            "-i", &rtsp_url,
-            "-c:v", "libx264",             // Re-encode to ensure proper keyframes
-            "-preset", "ultrafast",        // Fastest encoding preset
-            "-tune", "zerolatency",        // Optimize for low latency
-            "-g", "60",                    // Keyframe every 60 frames (~2s at 30fps)
-            "-keyint_min", "60",           // Minimum keyframe interval
-            "-sc_threshold", "0",          // Disable scene change detection
-            "-force_key_frames", "expr:gte(t,n_forced*2)", // Force keyframe every 2 seconds
-            "-an", // Disable audio for stability/latency per reference
-            "-f", "hls",
-            "-hls_time", "2",              // 2 second segments to align with keyframes
-            "-hls_list_size", "15",        // Keep 15 segments (30 seconds buffer) to match HLS.js maxBufferLength
-            "-hls_delete_threshold", "3",  // Delete segments only after 3 newer segments exist
-            "-hls_flags", "delete_segments+omit_endlist+program_date_time",
-            "-hls_segment_type", "mpegts", // Explicitly use MPEG-TS format
-            "-hls_segment_filename", segment_filename.to_str().unwrap(),
-            output_file.to_str().unwrap()
-        ])
-        .stdout(Stdio::null()) // Stdout to null
-        .stderr(Stdio::inherit()) // Stderr to inherit for debugging in console
+        .args(&args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| format!("Failed to start ffmpeg: {}", e))?;
 
@@ -108,7 +144,7 @@ pub async fn start_recording(state: State<'_, AppState>, camera: Camera) -> Resu
     }
 
     let conn = get_conn(&state)?;
-    
+
     // Insert initial recording record
     // Using a temporary filename for now
     let temp_filename = format!("temp_rec_{}.ts", id);
@@ -116,27 +152,40 @@ pub async fn start_recording(state: State<'_, AppState>, camera: Camera) -> Resu
         "INSERT INTO recordings (camera_id, filename, start_time, is_finished) VALUES (?1, ?2, ?3, ?4)",
         (id, &temp_filename, Utc::now().to_rfc3339(), false),
     ).map_err(|e| e.to_string())?;
-    
+
     // Get the rtsp url
     let rtsp_url = get_rtsp_url(&camera).await?;
-    
+
     let temp_file_path = state.recording_dir.join(&temp_filename);
-    
-    println!("Starting Recording FFmpeg for camera {}: {}", id, rtsp_url);
+
+    println!("[Recording] Starting FFmpeg for camera {}: {}", id, rtsp_url);
+
+    // Get encoder configuration
+    let encoder_selector = build_encoder_selector(&state).await?;
+    let encoder_config = encoder_selector.select_encoder_for_recording().await;
+
+    println!("[Recording] Using encoder: {} (GPU: {})", encoder_config.codec, encoder_config.is_gpu);
+
+    // Build FFmpeg command
+    let mut args = vec![
+        "-y".to_string(),
+        "-rtsp_transport".to_string(), "tcp".to_string(),
+        "-i".to_string(), rtsp_url.clone(),
+    ];
+
+    // Add encoder-specific arguments
+    args.extend(encoder_config.args);
+
+    // Add audio and output format
+    args.extend_from_slice(&[
+        "-c:a".to_string(), "aac".to_string(),
+        "-f".to_string(), "mpegts".to_string(),
+        temp_file_path.to_str().unwrap().to_string(),
+    ]);
 
     // Spawn FFmpeg for recording
-    // -i [URL] -c:v libx264 -preset ultrafast -c:a aac -f mpegts [out.ts]
     let child = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-rtsp_transport", "tcp",
-            "-i", &rtsp_url,
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-c:a", "aac", // Encode audio to AAC
-            "-f", "mpegts",
-            temp_file_path.to_str().unwrap()
-        ])
+        .args(&args)
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn()

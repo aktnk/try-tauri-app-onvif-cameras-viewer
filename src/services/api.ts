@@ -147,3 +147,41 @@ export const getCameraCapabilities = async (id: number): Promise<CameraCapabilit
   // This might be computed on frontend or backend. Let's assume backend for consistency.
   return await invoke('get_camera_capabilities', { id });
 };
+
+// ============= GPU & Encoder APIs =============
+
+export interface GpuCapabilities {
+  availableEncoders: string[];
+  preferredEncoder: string | null;
+  gpuType: string;
+  gpuName: string | null;
+}
+
+export const detectGpu = async (): Promise<GpuCapabilities> => {
+  return await invoke('detect_gpu');
+};
+
+export interface EncoderSettings {
+  id: number;
+  encoderMode: 'Auto' | 'GpuOnly' | 'CpuOnly';
+  gpuEncoder: string | null;
+  cpuEncoder: string;
+  preset: string;
+  quality: number;
+}
+
+export const getEncoderSettings = async (): Promise<EncoderSettings> => {
+  return await invoke('get_encoder_settings');
+};
+
+export interface UpdateEncoderSettings {
+  encoderMode?: 'Auto' | 'GpuOnly' | 'CpuOnly';
+  gpuEncoder?: string | null;
+  cpuEncoder?: string;
+  preset?: string;
+  quality?: number;
+}
+
+export const updateEncoderSettings = async (settings: UpdateEncoderSettings): Promise<EncoderSettings> => {
+  return await invoke('update_encoder_settings', { settings });
+};
