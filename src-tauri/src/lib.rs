@@ -86,6 +86,34 @@ pub fn run() {
 
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                // Clean up all running FFmpeg processes when the window is closing
+                if let Some(state) = window.try_state::<AppState>() {
+                    println!("[Cleanup] Application is closing, stopping all FFmpeg processes...");
+
+                    // Stop all streaming processes
+                    if let Ok(mut processes) = state.processes.lock() {
+                        for (camera_id, mut child) in processes.drain() {
+                            println!("[Cleanup] Stopping stream for camera {}", camera_id);
+                            let _ = child.kill();
+                            let _ = child.wait();
+                        }
+                    }
+
+                    // Stop all recording processes
+                    if let Ok(mut recording_processes) = state.recording_processes.lock() {
+                        for (camera_id, mut child) in recording_processes.drain() {
+                            println!("[Cleanup] Stopping recording for camera {}", camera_id);
+                            let _ = child.kill();
+                            let _ = child.wait();
+                        }
+                    }
+
+                    println!("[Cleanup] All FFmpeg processes stopped");
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_cameras,
             commands::add_camera,
