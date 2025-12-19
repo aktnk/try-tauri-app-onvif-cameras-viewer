@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
+// Windows-specific imports for hiding console window
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(non_snake_case)]
 pub struct GpuCapabilities {
@@ -57,9 +61,17 @@ pub async fn detect_gpu_capabilities() -> Result<GpuCapabilities, String> {
 }
 
 async fn get_available_encoders() -> Result<Vec<String>, String> {
-    let output = Command::new("ffmpeg")
-        .args(["-encoders", "-hide_banner"])
-        .output()
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-encoders", "-hide_banner"]);
+
+    // Hide console window on Windows
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output()
         .map_err(|e| format!("Failed to run ffmpeg: {}", e))?;
 
     if !output.status.success() {
@@ -128,9 +140,17 @@ async fn detect_gpu_type() -> (GpuType, Option<String>) {
 }
 
 async fn detect_nvidia_gpu() -> Result<String, String> {
-    let output = Command::new("nvidia-smi")
-        .args(["--query-gpu=name", "--format=csv,noheader"])
-        .output()
+    let mut cmd = Command::new("nvidia-smi");
+    cmd.args(["--query-gpu=name", "--format=csv,noheader"]);
+
+    // Hide console window on Windows
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output()
         .map_err(|_| "nvidia-smi not found".to_string())?;
 
     if !output.status.success() {
@@ -166,9 +186,13 @@ async fn detect_intel_gpu() -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         // Windows: check via wmic or registry
-        let output = Command::new("wmic")
-            .args(["path", "win32_VideoController", "get", "name"])
-            .output()
+        let mut cmd = Command::new("wmic");
+        cmd.args(["path", "win32_VideoController", "get", "name"]);
+
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let output = cmd.output()
             .map_err(|_| "wmic failed".to_string())?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -200,9 +224,13 @@ async fn detect_amd_gpu() -> Result<String, String> {
 
     #[cfg(target_os = "windows")]
     {
-        let output = Command::new("wmic")
-            .args(["path", "win32_VideoController", "get", "name"])
-            .output()
+        let mut cmd = Command::new("wmic");
+        cmd.args(["path", "win32_VideoController", "get", "name"]);
+
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let output = cmd.output()
             .map_err(|_| "wmic failed".to_string())?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -298,9 +326,17 @@ pub async fn test_encoder(encoder: &str) -> bool {
 
     println!("[GPU] Running test command: ffmpeg {}", args.join(" "));
 
-    let output = Command::new("ffmpeg")
-        .args(&args)
-        .output();
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(&args);
+
+    // Hide console window on Windows
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output();
 
     match output {
         Ok(result) => {

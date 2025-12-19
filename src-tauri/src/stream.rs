@@ -9,6 +9,10 @@ use std::path::PathBuf;
 use rusqlite::Connection;
 use chrono::Utc;
 
+// Windows-specific imports for hiding console window
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 // Helper to get DB connection inside stream module
 fn get_conn(state: &State<AppState>) -> Result<Connection, String> {
     Connection::open(&state.db_path).map_err(|e| e.to_string())
@@ -99,11 +103,19 @@ pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<
     ]);
 
     // Spawn FFmpeg
-    let child = Command::new("ffmpeg")
-        .args(&args)
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(&args)
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .spawn()
+        .stderr(Stdio::inherit());
+
+    // Hide console window on Windows
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let child = cmd.spawn()
         .map_err(|e| format!("Failed to start ffmpeg: {}", e))?;
 
     // Save process
@@ -184,11 +196,19 @@ pub async fn start_recording(state: State<'_, AppState>, camera: Camera) -> Resu
     ]);
 
     // Spawn FFmpeg for recording
-    let child = Command::new("ffmpeg")
-        .args(&args)
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(&args)
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .spawn()
+        .stderr(Stdio::inherit());
+
+    // Hide console window on Windows
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let child = cmd.spawn()
         .map_err(|e| format!("Failed to start recording ffmpeg: {}", e))?;
 
     // Save process
@@ -234,15 +254,23 @@ pub async fn stop_recording(state: State<'_, AppState>, id: i32) -> Result<(), S
 
              // Convert TS to MP4 (remux)
              // ffmpeg -i temp.ts -c copy final.mp4
-             let output = Command::new("ffmpeg")
-                .args([
+             let mut cmd = Command::new("ffmpeg");
+             cmd.args([
                     "-y",
                     "-i", temp_path.to_str().unwrap(),
                     "-c", "copy",
                     "-movflags", "+faststart",
                     final_path.to_str().unwrap()
-                ])
-                .output()
+                ]);
+
+             // Hide console window on Windows
+             #[cfg(target_os = "windows")]
+             {
+                 const CREATE_NO_WINDOW: u32 = 0x08000000;
+                 cmd.creation_flags(CREATE_NO_WINDOW);
+             }
+
+             let output = cmd.output()
                 .map_err(|e| format!("Failed to remux recording: {}", e))?;
 
              if !output.status.success() {
@@ -318,8 +346,8 @@ fn generate_thumbnail(video_path: &PathBuf, thumbnail_path: &PathBuf) -> Result<
     println!("[Thumbnail] Generating thumbnail from {:?} to {:?}", video_path, thumbnail_path);
 
     // FFmpeg command: extract frame at 2 seconds, scale to 320px width, high quality
-    let output = Command::new("ffmpeg")
-        .args([
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args([
             "-y",
             "-ss", "00:00:02",
             "-i", video_path.to_str().unwrap(),
@@ -327,8 +355,16 @@ fn generate_thumbnail(video_path: &PathBuf, thumbnail_path: &PathBuf) -> Result<
             "-vf", "scale=320:-1",
             "-q:v", "2",
             thumbnail_path.to_str().unwrap()
-        ])
-        .output()
+        ]);
+
+    // Hide console window on Windows
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output()
         .map_err(|e| format!("Failed to spawn FFmpeg for thumbnail: {}", e))?;
 
     if !output.status.success() {
