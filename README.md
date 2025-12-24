@@ -25,6 +25,12 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
     *   Supports Intel QSV, NVIDIA NVENC, AMD AMF, VA-API, and VideoToolbox.
     *   Reduces CPU usage by up to 70% compared to software encoding.
     *   Automatic fallback to CPU encoding if GPU is unavailable.
+-   **Scheduled Recording** 🆕: Automate recording with flexible time-based scheduling.
+    *   **Cron-based Scheduling**: Use cron expressions for flexible time patterns (e.g., daily at 9 AM, weekdays at 6 PM).
+    *   **FPS Control**: Specify custom frame rates for scheduled recordings.
+    *   **Duration Control**: Set recording duration in minutes.
+    *   **Enable/Disable**: Temporarily disable schedules without deletion.
+    *   **Persistent Schedules**: Automatically resume enabled schedules after app restart.
 -   **Modern UI**: Built with React, Material Design principles, and styled with Tailwind CSS.
 
 ## Technology Stack
@@ -42,6 +48,7 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 *   **ONVIF Protocol**: Custom SOAP implementation for `GetProfiles`, `GetStreamUri`, PTZ (`ContinuousMove`, `Stop`), and Time Sync (`GetSystemDateAndTime`, `SetSystemDateAndTime`).
 *   **Video Processing**: [FFmpeg](https://ffmpeg.org/) for transcoding, recording, and thumbnail generation (requires system FFmpeg).
 *   **Hardware Acceleration**: Automatic GPU detection and encoder selection (Intel QSV, NVIDIA NVENC, AMD AMF, VA-API, VideoToolbox).
+*   **Task Scheduling**: [tokio-cron-scheduler](https://crates.io/crates/tokio-cron-scheduler) for automated recording schedules.
 
 ## Getting Started
 
@@ -113,7 +120,7 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
 *   **Recording**: Fully functional (Record/Stop/Play with automatic thumbnail generation).
 *   **PTZ Control**: Implemented (Pan/Tilt/Zoom with UI feedback).
 *   **Time Synchronization**: Fully implemented (GetSystemDateAndTime/SetSystemDateAndTime).
-*   **Hardware Acceleration**: ✅ Fully implemented with automatic GPU detection and fallback.
+*   **Hardware Acceleration**: Fully implemented with automatic GPU detection and fallback.
     *   **CPU Usage Reduction**: ~70% reduction with GPU encoding (7-8% vs 20-30% per camera).
     *   **Supported Encoders**: Intel QSV, NVIDIA NVENC, AMD AMF, VA-API, VideoToolbox.
     *   **Automatic Fallback**: Falls back to CPU encoding (libx264) if GPU is unavailable.

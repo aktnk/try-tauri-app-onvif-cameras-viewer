@@ -185,3 +185,55 @@ export interface UpdateEncoderSettings {
 export const updateEncoderSettings = async (settings: UpdateEncoderSettings): Promise<EncoderSettings> => {
   return await invoke('update_encoder_settings', { settings });
 };
+
+// ============= Recording Schedule APIs =============
+
+export interface RecordingSchedule {
+  id: number;
+  camera_id: number;
+  name: string;
+  cron_expression: string;
+  duration_minutes: number;
+  fps: number | null;
+  is_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  camera_name: string | null;
+}
+
+export interface NewRecordingSchedule {
+  camera_id: number;
+  name: string;
+  cron_expression: string;
+  duration_minutes: number;
+  fps?: number | null;
+  is_enabled: boolean;
+}
+
+export interface UpdateRecordingSchedule {
+  name?: string;
+  cron_expression?: string;
+  duration_minutes?: number;
+  fps?: number | null;
+  is_enabled?: boolean;
+}
+
+export const getRecordingSchedules = async (): Promise<RecordingSchedule[]> => {
+  return await invoke('get_recording_schedules');
+};
+
+export const addRecordingSchedule = async (schedule: NewRecordingSchedule): Promise<RecordingSchedule> => {
+  return await invoke('add_recording_schedule', { schedule });
+};
+
+export const updateRecordingSchedule = async (id: number, updates: UpdateRecordingSchedule): Promise<RecordingSchedule> => {
+  return await invoke('update_recording_schedule', { id, updates });
+};
+
+export const deleteRecordingSchedule = async (id: number): Promise<void> => {
+  await invoke('delete_recording_schedule', { id });
+};
+
+export const toggleSchedule = async (id: number, enabled: boolean): Promise<RecordingSchedule> => {
+  return await invoke('toggle_schedule', { id, enabled });
+};

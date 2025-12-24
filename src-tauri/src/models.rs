@@ -147,3 +147,41 @@ pub struct UpdateEncoderSettings {
     pub preset: Option<String>,
     pub quality: Option<i32>,
 }
+
+// Recording Schedule
+#[allow(non_snake_case)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordingSchedule {
+    pub id: i32,
+    pub camera_id: i32,
+    pub name: String,
+    pub cron_expression: String,
+    pub duration_minutes: i32,
+    pub fps: Option<i32>,
+    pub is_enabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    // Joined fields
+    pub camera_name: Option<String>,
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NewRecordingSchedule {
+    pub camera_id: i32,
+    pub name: String,
+    pub cron_expression: String,
+    pub duration_minutes: i32,
+    pub fps: Option<i32>,
+    pub is_enabled: bool,
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateRecordingSchedule {
+    pub name: Option<String>,
+    pub cron_expression: Option<String>,
+    pub duration_minutes: Option<i32>,
+    pub fps: Option<i32>,
+    pub is_enabled: Option<bool>,
+}

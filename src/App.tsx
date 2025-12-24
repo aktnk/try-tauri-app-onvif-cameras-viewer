@@ -8,7 +8,7 @@ import AddCameraModal from './components/AddCameraModal';
 import DiscoverCamerasModal from './components/DiscoverCamerasModal';
 import PTZControls from './components/PTZControls';
 import EncoderSettings from './components/EncoderSettings';
-import { getCameras, startStream, stopStream, startRecording, stopRecording, checkPTZCapabilities } from './services/api';
+import { getCameras, startStream, stopStream, startRecording, stopRecording, checkPTZCapabilities, getRecordingSchedules, addRecordingSchedule, deleteRecordingSchedule } from './services/api';
 import type { Camera } from './services/api';
 
 // Style for the modal (keeping MUI sx for complex overlay centering if tailwind is tricky, but Tailwind is better)
@@ -329,6 +329,54 @@ function App() {
     fetchCameras();
   };
 
+  // Test function for recording schedules
+  const testScheduleAPIs = async () => {
+    try {
+      console.log('=== Testing Schedule APIs ===');
+
+      // 1. Get all schedules
+      console.log('1. Getting all schedules...');
+      const schedules = await getRecordingSchedules();
+      console.log('Current schedules:', schedules);
+
+      // 2. Add a test schedule (if cameras exist)
+      if (cameras.length > 0) {
+        console.log('2. Adding test schedule...');
+        const newSchedule = await addRecordingSchedule({
+          camera_id: cameras[0].id,
+          name: 'Test Schedule - ' + new Date().toLocaleTimeString(),
+          cron_expression: '0 */5 * * * *', // Every 5 minutes
+          duration_minutes: 2,
+          fps: 30,
+          is_enabled: true
+        });
+        console.log('Added schedule:', newSchedule);
+
+        // 3. Get updated list
+        console.log('3. Getting updated schedules...');
+        const updatedSchedules = await getRecordingSchedules();
+        console.log('Updated schedules:', updatedSchedules);
+
+        // 4. Delete the test schedule
+        console.log('4. Deleting test schedule...');
+        await deleteRecordingSchedule(newSchedule.id);
+        console.log('Schedule deleted!');
+
+        // 5. Get final list
+        console.log('5. Getting final schedules...');
+        const finalSchedules = await getRecordingSchedules();
+        console.log('Final schedules:', finalSchedules);
+
+        alert('✅ Schedule API test completed! Check console for details.');
+      } else {
+        alert('⚠️ No cameras available. Please add a camera first.');
+      }
+    } catch (error: any) {
+      console.error('Schedule API test failed:', error);
+      alert('❌ Schedule API test failed: ' + error.message);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 pb-8">
       <CssBaseline />
@@ -337,6 +385,15 @@ function App() {
           <Typography variant="h6" component="div" className="flex-grow font-semibold">
             ONVIF Camera Viewer (Tauri)
           </Typography>
+          <Button
+            color="inherit"
+            onClick={testScheduleAPIs}
+            variant="outlined"
+            size="small"
+            className="mr-4"
+          >
+            Test Schedule API
+          </Button>
           <IconButton
             color="inherit"
             onClick={() => setIsEncoderSettingsOpen(true)}
