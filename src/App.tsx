@@ -8,6 +8,7 @@ import AddCameraModal from './components/AddCameraModal';
 import DiscoverCamerasModal from './components/DiscoverCamerasModal';
 import PTZControls from './components/PTZControls';
 import EncoderSettings from './components/EncoderSettings';
+import ScheduleRecording from './components/ScheduleRecording';
 import { getCameras, startStream, stopStream, startRecording, stopRecording, checkPTZCapabilities } from './services/api';
 import type { Camera } from './services/api';
 
@@ -329,6 +330,7 @@ function App() {
     fetchCameras();
   };
 
+
   return (
     <div className="min-h-screen bg-gray-100 pb-8">
       <CssBaseline />
@@ -455,6 +457,8 @@ function App() {
           )}
 
           <RecordingList listVersion={recordingListVersion} onPlayRecording={handlePlayRecording} />
+
+          <ScheduleRecording />
 
         </Container>
       </main>

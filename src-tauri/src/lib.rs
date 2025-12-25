@@ -5,6 +5,7 @@ pub mod stream;
 pub mod onvif;
 pub mod gpu_detector;
 pub mod encoder;
+pub mod scheduler;
 
 use tauri::Manager;
 use std::path::PathBuf;
@@ -21,6 +22,9 @@ pub struct AppState {
     // using std::process::Child allows us to kill it later
     pub processes: Arc<Mutex<HashMap<i32, Child>>>,
     pub recording_processes: Arc<Mutex<HashMap<i32, Child>>>,
+    pub scheduler: Arc<tokio::sync::Mutex<scheduler::SchedulerManager>>,
+    // Map<schedule_id, camera_id> for active scheduled recordings
+    pub active_scheduled_recordings: Arc<tokio::sync::Mutex<HashMap<i32, i32>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -56,6 +60,12 @@ pub fn run() {
             let thumbnails_dir = recording_dir.join("thumbnails");
             std::fs::create_dir_all(&thumbnails_dir).expect("failed to create thumbnails dir");
 
+            // Initialize scheduler
+            let scheduler = tauri::async_runtime::block_on(async {
+                scheduler::SchedulerManager::new().await
+                    .expect("Failed to create scheduler")
+            });
+
             let state = AppState {
                 db_path: db_path.to_string_lossy().to_string(),
                 server_port: 3333,
@@ -63,9 +73,20 @@ pub fn run() {
                 recording_dir: recording_dir.clone(),
                 processes: Arc::new(Mutex::new(HashMap::new())),
                 recording_processes: Arc::new(Mutex::new(HashMap::new())),
+                scheduler: Arc::new(tokio::sync::Mutex::new(scheduler)),
+                active_scheduled_recordings: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             };
-            
+
+            // Manage state first
             app.manage(state);
+
+            // Load existing enabled schedules from DB
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = load_enabled_schedules_from_app(app_handle).await {
+                    eprintln!("[Init] Failed to load schedules: {}", e);
+                }
+            });
 
             // Start Axum server
             tauri::async_runtime::spawn(async move {
@@ -133,8 +154,87 @@ pub fn run() {
             commands::get_camera_capabilities,
             commands::detect_gpu,
             commands::get_encoder_settings,
-            commands::update_encoder_settings
+            commands::update_encoder_settings,
+            commands::get_recording_schedules,
+            commands::get_recording_cameras,
+            commands::add_recording_schedule,
+            commands::update_recording_schedule,
+            commands::delete_recording_schedule,
+            commands::toggle_schedule
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// Helper function to load enabled schedules on startup
+async fn load_enabled_schedules_from_app(app_handle: tauri::AppHandle) -> Result<(), String> {
+    use rusqlite::Connection;
+    use chrono::DateTime;
+
+    println!("[Init] Loading enabled schedules from database...");
+
+    // Get managed state
+    let state = app_handle.state::<AppState>();
+
+    let conn = Connection::open(&state.db_path).map_err(|e| e.to_string())?;
+
+    let schedules = {
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.camera_id, s.name, s.cron_expression, s.duration_minutes, s.fps, s.is_enabled,
+                    s.created_at, s.updated_at, c.name as camera_name
+             FROM recording_schedules s
+             LEFT JOIN cameras c ON s.camera_id = c.id
+             WHERE s.is_enabled = 1"
+        ).map_err(|e| e.to_string())?;
+
+        let schedules_iter = stmt.query_map([], |row| {
+            Ok(models::RecordingSchedule {
+                id: row.get(0)?,
+                camera_id: row.get(1)?,
+                name: row.get(2)?,
+                cron_expression: row.get(3)?,
+                duration_minutes: row.get(4)?,
+                fps: row.get(5)?,
+                is_enabled: row.get(6)?,
+                created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).unwrap_or(chrono::Utc::now().into()).with_timezone(&chrono::Utc),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap_or(chrono::Utc::now().into()).with_timezone(&chrono::Utc),
+                camera_name: row.get(9)?,
+                next_run: None, // Not needed for scheduler initialization
+            })
+        }).map_err(|e| e.to_string())?;
+
+        let mut schedules = Vec::new();
+        for schedule in schedules_iter {
+            schedules.push(schedule.map_err(|e| e.to_string())?);
+        }
+        schedules
+    };
+
+    // Drop connection before async operations (stmt is already dropped by this point)
+    drop(conn);
+
+    // Create Arc<AppState> for scheduler since it expects Arc
+    let state_arc = Arc::new(AppState {
+        db_path: state.db_path.clone(),
+        server_port: state.server_port,
+        stream_dir: state.stream_dir.clone(),
+        recording_dir: state.recording_dir.clone(),
+        processes: state.processes.clone(),
+        recording_processes: state.recording_processes.clone(),
+        scheduler: state.scheduler.clone(),
+        active_scheduled_recordings: state.active_scheduled_recordings.clone(),
+    });
+
+    let scheduler = state.scheduler.lock().await;
+
+    for schedule in schedules {
+        println!("[Init] Adding schedule '{}' (ID: {})", schedule.name, schedule.id);
+        if let Err(e) = scheduler.add_schedule(schedule.clone(), state_arc.clone()).await {
+            eprintln!("[Init] Failed to add schedule '{}': {}", schedule.name, e);
+        }
+    }
+
+    println!("[Init] Finished loading schedules");
+
+    Ok(())
 }

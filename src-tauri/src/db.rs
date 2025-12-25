@@ -60,6 +60,23 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> Result<()> {
         [],
     )?;
 
+    // Create recording schedules table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS recording_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            camera_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            cron_expression TEXT NOT NULL,
+            duration_minutes INTEGER NOT NULL,
+            fps INTEGER,
+            is_enabled BOOLEAN DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
     Ok(())
 }
 

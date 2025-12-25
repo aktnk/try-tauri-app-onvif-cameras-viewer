@@ -1,9 +1,12 @@
 use tauri::State;
-use crate::models::{Camera, NewCamera, Recording, DiscoveredDevice, PTZCapabilities, PTZMovement, PTZResult, CameraTimeInfo, TimeSyncResult, CameraCapabilities, EncoderSettings, UpdateEncoderSettings};
+use crate::models::{Camera, NewCamera, Recording, DiscoveredDevice, PTZCapabilities, PTZMovement, PTZResult, CameraTimeInfo, TimeSyncResult, CameraCapabilities, EncoderSettings, UpdateEncoderSettings, RecordingSchedule, NewRecordingSchedule, UpdateRecordingSchedule};
 use crate::AppState;
 use crate::gpu_detector::{detect_gpu_capabilities, GpuCapabilities};
 use rusqlite::Connection;
 use chrono::{Utc, DateTime};
+use tokio_cron_scheduler::Job;
+use chrono_tz::Asia::Tokyo;
+use std::sync::Arc;
 
 fn get_conn(state: &State<AppState>) -> Result<Connection, String> {
     Connection::open(&state.db_path).map_err(|e| e.to_string())
@@ -436,4 +439,360 @@ pub async fn update_encoder_settings(
 
     // Return updated settings
     get_encoder_settings(state).await
+}
+
+// ========== Recording Schedule Commands ==========
+
+fn validate_cron_expression(expr: &str) -> Result<String, String> {
+    // Convert 5-field cron (minute hour day month dow) to 6-field (second minute hour day month dow)
+    let normalized_expr = if expr.split_whitespace().count() == 5 {
+        format!("0 {}", expr) // Add "0" seconds at the beginning
+    } else {
+        expr.to_string()
+    };
+
+    // Validate using the same parser as the scheduler (tokio-cron-scheduler with Tokyo timezone)
+    Job::new_async_tz(normalized_expr.as_str(), Tokyo, |_uuid, _lock| {
+        Box::pin(async move {
+            // Validation only - this job is never executed
+        })
+    })
+    .map(|_| normalized_expr)
+    .map_err(|e| format!("Invalid cron expression: {}", e))
+}
+
+// Calculate next run time for a cron expression (returns None if disabled or no future runs)
+fn calculate_next_run(cron_expr: &str, is_enabled: bool) -> Option<String> {
+    use croner::Cron;
+
+    if !is_enabled {
+        return None;
+    }
+
+    // Parse the cron expression using croner
+    // cron_expr is in 6-field format: "second minute hour day month dow"
+    let cron = Cron::new(cron_expr)
+        .with_seconds_optional()
+        .parse()
+        .ok()?;
+
+    // Get current time in JST
+    let now = Utc::now().with_timezone(&Tokyo);
+
+    // Find next occurrence
+    cron.find_next_occurrence(&now, false)
+        .ok()
+        .map(|next| {
+            // Convert to JST and format as ISO 8601
+            let jst_time = next.with_timezone(&Tokyo);
+            jst_time.to_rfc3339()
+        })
+}
+
+#[tauri::command]
+pub async fn get_recording_schedules(
+    state: State<'_, AppState>
+) -> Result<Vec<RecordingSchedule>, String> {
+    let conn = get_conn(&state)?;
+
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.camera_id, s.name, s.cron_expression, s.duration_minutes, s.fps, s.is_enabled,
+                s.created_at, s.updated_at, c.name as camera_name
+         FROM recording_schedules s
+         LEFT JOIN cameras c ON s.camera_id = c.id
+         ORDER BY s.created_at DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let schedules_iter = stmt.query_map([], |row| {
+        let cron_expression: String = row.get(3)?;
+        let is_enabled: bool = row.get(6)?;
+
+        Ok(RecordingSchedule {
+            id: row.get(0)?,
+            camera_id: row.get(1)?,
+            name: row.get(2)?,
+            cron_expression: cron_expression.clone(),
+            duration_minutes: row.get(4)?,
+            fps: row.get(5)?,
+            is_enabled,
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+            camera_name: row.get(9)?,
+            next_run: calculate_next_run(&cron_expression, is_enabled),
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut schedules = Vec::new();
+    for schedule in schedules_iter {
+        schedules.push(schedule.map_err(|e| e.to_string())?);
+    }
+
+    Ok(schedules)
+}
+
+#[tauri::command]
+pub async fn add_recording_schedule(
+    state: State<'_, AppState>,
+    schedule: NewRecordingSchedule
+) -> Result<RecordingSchedule, String> {
+    // Validate and normalize cron expression (5-field -> 6-field)
+    let normalized_cron = validate_cron_expression(&schedule.cron_expression)?;
+
+    let conn = get_conn(&state)?;
+
+    conn.execute(
+        "INSERT INTO recording_schedules (camera_id, name, cron_expression, duration_minutes, fps, is_enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        (
+            &schedule.camera_id,
+            &schedule.name,
+            &normalized_cron,
+            &schedule.duration_minutes,
+            &schedule.fps,
+            &schedule.is_enabled,
+        ),
+    ).map_err(|e| e.to_string())?;
+
+    let id = conn.last_insert_rowid() as i32;
+
+    // Get the created schedule
+    let created_schedule = {
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.camera_id, s.name, s.cron_expression, s.duration_minutes, s.fps, s.is_enabled,
+                    s.created_at, s.updated_at, c.name as camera_name
+             FROM recording_schedules s
+             LEFT JOIN cameras c ON s.camera_id = c.id
+             WHERE s.id = ?1"
+        ).map_err(|e| e.to_string())?;
+
+        stmt.query_row([id], |row| {
+            let cron_expression: String = row.get(3)?;
+            let is_enabled: bool = row.get(6)?;
+
+            Ok(RecordingSchedule {
+                id: row.get(0)?,
+                camera_id: row.get(1)?,
+                name: row.get(2)?,
+                cron_expression: cron_expression.clone(),
+                duration_minutes: row.get(4)?,
+                fps: row.get(5)?,
+                is_enabled,
+                created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+                camera_name: row.get(9)?,
+                next_run: calculate_next_run(&cron_expression, is_enabled),
+            })
+        }).map_err(|e| e.to_string())?
+    };
+
+    // Drop connection before async operations
+    drop(conn);
+
+    // Add to scheduler if enabled
+    if created_schedule.is_enabled {
+        let state_arc = Arc::new(AppState {
+            db_path: state.db_path.clone(),
+            server_port: state.server_port,
+            stream_dir: state.stream_dir.clone(),
+            recording_dir: state.recording_dir.clone(),
+            processes: state.processes.clone(),
+            recording_processes: state.recording_processes.clone(),
+            scheduler: state.scheduler.clone(),
+            active_scheduled_recordings: state.active_scheduled_recordings.clone(),
+        });
+
+        let scheduler = state.scheduler.lock().await;
+        scheduler.add_schedule(created_schedule.clone(), state_arc).await?;
+    }
+
+    println!("[Schedule] Created schedule '{}' (ID: {})", created_schedule.name, created_schedule.id);
+
+    Ok(created_schedule)
+}
+
+#[tauri::command]
+pub async fn update_recording_schedule(
+    state: State<'_, AppState>,
+    id: i32,
+    updates: UpdateRecordingSchedule
+) -> Result<RecordingSchedule, String> {
+    // Validate and normalize cron expression if provided
+    let normalized_cron = if let Some(ref expr) = updates.cron_expression {
+        Some(validate_cron_expression(expr)?)
+    } else {
+        None
+    };
+
+    let conn = get_conn(&state)?;
+
+    // Check if schedule exists and get current state
+    let old_enabled: bool = conn.query_row(
+        "SELECT is_enabled FROM recording_schedules WHERE id = ?1",
+        [id],
+        |row| row.get(0)
+    ).map_err(|e| format!("Schedule not found: {}", e))?;
+
+    // Build dynamic UPDATE query
+    {
+        let mut set_clauses = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(ref name) = updates.name {
+            set_clauses.push("name = ?");
+            params.push(Box::new(name.clone()));
+        }
+        if let Some(ref cron_expr) = normalized_cron {
+            set_clauses.push("cron_expression = ?");
+            params.push(Box::new(cron_expr.clone()));
+        }
+        if let Some(duration) = updates.duration_minutes {
+            set_clauses.push("duration_minutes = ?");
+            params.push(Box::new(duration));
+        }
+        if let Some(fps) = updates.fps {
+            set_clauses.push("fps = ?");
+            params.push(Box::new(fps));
+        }
+        if let Some(enabled) = updates.is_enabled {
+            set_clauses.push("is_enabled = ?");
+            params.push(Box::new(enabled));
+        }
+
+        // Always update updated_at
+        set_clauses.push("updated_at = ?");
+        params.push(Box::new(Utc::now().to_rfc3339()));
+
+        // Add id as the last parameter for WHERE clause
+        params.push(Box::new(id));
+
+        // Execute single UPDATE if there are fields to update
+        if !set_clauses.is_empty() {
+            let sql = format!(
+                "UPDATE recording_schedules SET {} WHERE id = ?",
+                set_clauses.join(", ")
+            );
+
+            let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+            conn.execute(&sql, params_ref.as_slice())
+                .map_err(|e| e.to_string())?;
+        }
+    } // params is dropped here before any .await
+
+    // Get updated schedule
+    let updated_schedule = {
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.camera_id, s.name, s.cron_expression, s.duration_minutes, s.fps, s.is_enabled,
+                    s.created_at, s.updated_at, c.name as camera_name
+             FROM recording_schedules s
+             LEFT JOIN cameras c ON s.camera_id = c.id
+             WHERE s.id = ?1"
+        ).map_err(|e| e.to_string())?;
+
+        stmt.query_row([id], |row| {
+            let cron_expression: String = row.get(3)?;
+            let is_enabled: bool = row.get(6)?;
+
+            Ok(RecordingSchedule {
+                id: row.get(0)?,
+                camera_id: row.get(1)?,
+                name: row.get(2)?,
+                cron_expression: cron_expression.clone(),
+                duration_minutes: row.get(4)?,
+                fps: row.get(5)?,
+                is_enabled,
+                created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+                camera_name: row.get(9)?,
+                next_run: calculate_next_run(&cron_expression, is_enabled),
+            })
+        }).map_err(|e| e.to_string())?
+    };
+
+    // Drop connection before async operations
+    drop(conn);
+
+    // Handle scheduler updates
+    if updates.is_enabled.is_some() || updates.cron_expression.is_some() || updates.duration_minutes.is_some() {
+        let state_arc = Arc::new(AppState {
+            db_path: state.db_path.clone(),
+            server_port: state.server_port,
+            stream_dir: state.stream_dir.clone(),
+            recording_dir: state.recording_dir.clone(),
+            processes: state.processes.clone(),
+            recording_processes: state.recording_processes.clone(),
+            scheduler: state.scheduler.clone(),
+            active_scheduled_recordings: state.active_scheduled_recordings.clone(),
+        });
+
+        let scheduler = state.scheduler.lock().await;
+
+        // Remove old job if exists
+        if old_enabled {
+            let _ = scheduler.remove_schedule(id).await;
+        }
+
+        // Add new job if enabled
+        if updated_schedule.is_enabled {
+            scheduler.add_schedule(updated_schedule.clone(), state_arc).await?;
+        }
+    }
+
+    println!("[Schedule] Updated schedule '{}' (ID: {})", updated_schedule.name, updated_schedule.id);
+
+    Ok(updated_schedule)
+}
+
+#[tauri::command]
+pub async fn delete_recording_schedule(
+    state: State<'_, AppState>,
+    id: i32
+) -> Result<(), String> {
+    // Remove from scheduler first
+    let scheduler = state.scheduler.lock().await;
+    let _ = scheduler.remove_schedule(id).await; // Ignore error if not found
+    drop(scheduler);
+
+    // Delete from database
+    let conn = get_conn(&state)?;
+    let affected = conn.execute("DELETE FROM recording_schedules WHERE id = ?1", [id])
+        .map_err(|e| e.to_string())?;
+
+    if affected == 0 {
+        return Err("Schedule not found".to_string());
+    }
+
+    println!("[Schedule] Deleted schedule ID: {}", id);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn toggle_schedule(
+    state: State<'_, AppState>,
+    id: i32,
+    enabled: bool
+) -> Result<RecordingSchedule, String> {
+    update_recording_schedule(
+        state,
+        id,
+        UpdateRecordingSchedule {
+            name: None,
+            cron_expression: None,
+            duration_minutes: None,
+            fps: None,
+            is_enabled: Some(enabled),
+        }
+    ).await
+}
+
+#[tauri::command]
+pub async fn get_recording_cameras(
+    state: State<'_, AppState>
+) -> Result<Vec<i32>, String> {
+    // Get list of camera IDs currently recording
+    let processes = state.recording_processes.lock()
+        .map_err(|e| format!("Failed to lock recording processes: {}", e))?;
+
+    let camera_ids: Vec<i32> = processes.keys().copied().collect();
+    Ok(camera_ids)
 }
