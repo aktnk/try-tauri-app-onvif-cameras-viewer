@@ -199,6 +199,7 @@ async fn load_enabled_schedules_from_app(app_handle: tauri::AppHandle) -> Result
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).unwrap_or(chrono::Utc::now().into()).with_timezone(&chrono::Utc),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap_or(chrono::Utc::now().into()).with_timezone(&chrono::Utc),
                 camera_name: row.get(9)?,
+                next_run: None, // Not needed for scheduler initialization
             })
         }).map_err(|e| e.to_string())?;
 

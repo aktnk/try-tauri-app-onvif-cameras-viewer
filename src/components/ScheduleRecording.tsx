@@ -316,6 +316,25 @@ export default function ScheduleRecording({ onScheduleChanged }: ScheduleRecordi
                           color="primary"
                           variant="outlined"
                         />
+                        {/* Schedule Status with Next Run Time */}
+                        <Chip
+                          label={
+                            schedule.next_run
+                              ? `Next: ${new Date(schedule.next_run).toLocaleString('ja-JP', {
+                                  timeZone: 'Asia/Tokyo',
+                                  year: 'numeric',
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}`
+                              : "Inactive"
+                          }
+                          size="small"
+                          color={schedule.next_run ? "success" : "default"}
+                          variant={schedule.next_run ? "filled" : "outlined"}
+                        />
+                        {/* Recording Status */}
                         {isRecording && (
                           <Chip
                             label="Recording"

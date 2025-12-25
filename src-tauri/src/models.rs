@@ -163,6 +163,8 @@ pub struct RecordingSchedule {
     pub updated_at: DateTime<Utc>,
     // Joined fields
     pub camera_name: Option<String>,
+    // Computed field (not stored in DB)
+    pub next_run: Option<String>, // ISO 8601 format (JST)
 }
 
 #[allow(non_snake_case)]

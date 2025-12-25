@@ -461,6 +461,34 @@ fn validate_cron_expression(expr: &str) -> Result<String, String> {
     .map_err(|e| format!("Invalid cron expression: {}", e))
 }
 
+// Calculate next run time for a cron expression (returns None if disabled or no future runs)
+fn calculate_next_run(cron_expr: &str, is_enabled: bool) -> Option<String> {
+    use croner::Cron;
+
+    if !is_enabled {
+        return None;
+    }
+
+    // Parse the cron expression using croner
+    // cron_expr is in 6-field format: "second minute hour day month dow"
+    let cron = Cron::new(cron_expr)
+        .with_seconds_optional()
+        .parse()
+        .ok()?;
+
+    // Get current time in JST
+    let now = Utc::now().with_timezone(&Tokyo);
+
+    // Find next occurrence
+    cron.find_next_occurrence(&now, false)
+        .ok()
+        .map(|next| {
+            // Convert to JST and format as ISO 8601
+            let jst_time = next.with_timezone(&Tokyo);
+            jst_time.to_rfc3339()
+        })
+}
+
 #[tauri::command]
 pub async fn get_recording_schedules(
     state: State<'_, AppState>
@@ -476,17 +504,21 @@ pub async fn get_recording_schedules(
     ).map_err(|e| e.to_string())?;
 
     let schedules_iter = stmt.query_map([], |row| {
+        let cron_expression: String = row.get(3)?;
+        let is_enabled: bool = row.get(6)?;
+
         Ok(RecordingSchedule {
             id: row.get(0)?,
             camera_id: row.get(1)?,
             name: row.get(2)?,
-            cron_expression: row.get(3)?,
+            cron_expression: cron_expression.clone(),
             duration_minutes: row.get(4)?,
             fps: row.get(5)?,
-            is_enabled: row.get(6)?,
+            is_enabled,
             created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
             updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
             camera_name: row.get(9)?,
+            next_run: calculate_next_run(&cron_expression, is_enabled),
         })
     }).map_err(|e| e.to_string())?;
 
@@ -534,17 +566,21 @@ pub async fn add_recording_schedule(
         ).map_err(|e| e.to_string())?;
 
         stmt.query_row([id], |row| {
+            let cron_expression: String = row.get(3)?;
+            let is_enabled: bool = row.get(6)?;
+
             Ok(RecordingSchedule {
                 id: row.get(0)?,
                 camera_id: row.get(1)?,
                 name: row.get(2)?,
-                cron_expression: row.get(3)?,
+                cron_expression: cron_expression.clone(),
                 duration_minutes: row.get(4)?,
                 fps: row.get(5)?,
-                is_enabled: row.get(6)?,
+                is_enabled,
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
                 camera_name: row.get(9)?,
+                next_run: calculate_next_run(&cron_expression, is_enabled),
             })
         }).map_err(|e| e.to_string())?
     };
@@ -653,17 +689,21 @@ pub async fn update_recording_schedule(
         ).map_err(|e| e.to_string())?;
 
         stmt.query_row([id], |row| {
+            let cron_expression: String = row.get(3)?;
+            let is_enabled: bool = row.get(6)?;
+
             Ok(RecordingSchedule {
                 id: row.get(0)?,
                 camera_id: row.get(1)?,
                 name: row.get(2)?,
-                cron_expression: row.get(3)?,
+                cron_expression: cron_expression.clone(),
                 duration_minutes: row.get(4)?,
                 fps: row.get(5)?,
-                is_enabled: row.get(6)?,
+                is_enabled,
                 created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
                 camera_name: row.get(9)?,
+                next_run: calculate_next_run(&cron_expression, is_enabled),
             })
         }).map_err(|e| e.to_string())?
     };

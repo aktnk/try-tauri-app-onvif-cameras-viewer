@@ -199,6 +199,7 @@ export interface RecordingSchedule {
   created_at: string;
   updated_at: string;
   camera_name: string | null;
+  next_run: string | null; // "active" if will run, null if disabled/no future runs
 }
 
 export interface NewRecordingSchedule {
