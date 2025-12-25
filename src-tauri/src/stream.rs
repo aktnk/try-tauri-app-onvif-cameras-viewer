@@ -183,8 +183,8 @@ async fn start_recording_internal(
     }
 
     // Get camera info
-    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
     let camera = {
+        let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, name, type, host, port, user, pass, xaddr, stream_path, created_at, updated_at
              FROM cameras WHERE id = ?1"
@@ -214,18 +214,10 @@ async fn start_recording_internal(
         }).map_err(|e| format!("Camera not found: {}", e))?
     };
 
-    // Insert initial recording record
-    let temp_filename = format!("temp_rec_{}.ts", id);
-    conn.execute(
-        "INSERT INTO recordings (camera_id, filename, start_time, is_finished) VALUES (?1, ?2, ?3, ?4)",
-        (id, &temp_filename, Utc::now().to_rfc3339(), false),
-    ).map_err(|e| e.to_string())?;
-
-    drop(conn);
-
     // Get the rtsp url
     let rtsp_url = get_rtsp_url(&camera).await?;
 
+    let temp_filename = format!("temp_rec_{}.ts", id);
     let temp_file_path = recording_dir.join(&temp_filename);
 
     println!("[Recording] Starting FFmpeg for camera {}: {}", id, rtsp_url);
@@ -279,6 +271,24 @@ async fn start_recording_internal(
 
     let child = cmd.spawn()
         .map_err(|e| format!("Failed to start recording ffmpeg: {}", e))?;
+
+    // FFmpeg started successfully - now insert DB record in transaction
+    {
+        let mut conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+        tx.execute(
+            "INSERT INTO recordings (camera_id, filename, start_time, is_finished) VALUES (?1, ?2, ?3, ?4)",
+            (id, &temp_filename, Utc::now().to_rfc3339(), false),
+        ).map_err(|e| e.to_string())?;
+
+        tx.commit().map_err(|e| {
+            eprintln!("[Recording] Failed to commit transaction");
+            format!("Failed to commit recording transaction: {}", e)
+        })?;
+
+        println!("[Recording] Recording registered in database successfully");
+    }
 
     // Save process
     {
