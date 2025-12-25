@@ -596,32 +596,51 @@ pub async fn update_recording_schedule(
         |row| row.get(0)
     ).map_err(|e| format!("Schedule not found: {}", e))?;
 
-    // Update fields
-    if let Some(ref name) = updates.name {
-        conn.execute("UPDATE recording_schedules SET name = ?1, updated_at = ?2 WHERE id = ?3",
-                     (name, Utc::now().to_rfc3339(), id))
-            .map_err(|e| e.to_string())?;
-    }
-    if let Some(ref cron_expr) = normalized_cron {
-        conn.execute("UPDATE recording_schedules SET cron_expression = ?1, updated_at = ?2 WHERE id = ?3",
-                     (cron_expr, Utc::now().to_rfc3339(), id))
-            .map_err(|e| e.to_string())?;
-    }
-    if let Some(duration) = updates.duration_minutes {
-        conn.execute("UPDATE recording_schedules SET duration_minutes = ?1, updated_at = ?2 WHERE id = ?3",
-                     (duration, Utc::now().to_rfc3339(), id))
-            .map_err(|e| e.to_string())?;
-    }
-    if let Some(fps) = updates.fps {
-        conn.execute("UPDATE recording_schedules SET fps = ?1, updated_at = ?2 WHERE id = ?3",
-                     (fps, Utc::now().to_rfc3339(), id))
-            .map_err(|e| e.to_string())?;
-    }
-    if let Some(enabled) = updates.is_enabled {
-        conn.execute("UPDATE recording_schedules SET is_enabled = ?1, updated_at = ?2 WHERE id = ?3",
-                     (enabled, Utc::now().to_rfc3339(), id))
-            .map_err(|e| e.to_string())?;
-    }
+    // Build dynamic UPDATE query
+    {
+        let mut set_clauses = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(ref name) = updates.name {
+            set_clauses.push("name = ?");
+            params.push(Box::new(name.clone()));
+        }
+        if let Some(ref cron_expr) = normalized_cron {
+            set_clauses.push("cron_expression = ?");
+            params.push(Box::new(cron_expr.clone()));
+        }
+        if let Some(duration) = updates.duration_minutes {
+            set_clauses.push("duration_minutes = ?");
+            params.push(Box::new(duration));
+        }
+        if let Some(fps) = updates.fps {
+            set_clauses.push("fps = ?");
+            params.push(Box::new(fps));
+        }
+        if let Some(enabled) = updates.is_enabled {
+            set_clauses.push("is_enabled = ?");
+            params.push(Box::new(enabled));
+        }
+
+        // Always update updated_at
+        set_clauses.push("updated_at = ?");
+        params.push(Box::new(Utc::now().to_rfc3339()));
+
+        // Add id as the last parameter for WHERE clause
+        params.push(Box::new(id));
+
+        // Execute single UPDATE if there are fields to update
+        if !set_clauses.is_empty() {
+            let sql = format!(
+                "UPDATE recording_schedules SET {} WHERE id = ?",
+                set_clauses.join(", ")
+            );
+
+            let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+            conn.execute(&sql, params_ref.as_slice())
+                .map_err(|e| e.to_string())?;
+        }
+    } // params is dropped here before any .await
 
     // Get updated schedule
     let updated_schedule = {
