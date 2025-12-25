@@ -4,8 +4,8 @@ use crate::AppState;
 use crate::gpu_detector::{detect_gpu_capabilities, GpuCapabilities};
 use rusqlite::Connection;
 use chrono::{Utc, DateTime};
-use cron::Schedule;
-use std::str::FromStr;
+use tokio_cron_scheduler::Job;
+use chrono_tz::Asia::Tokyo;
 use std::sync::Arc;
 
 fn get_conn(state: &State<AppState>) -> Result<Connection, String> {
@@ -451,9 +451,14 @@ fn validate_cron_expression(expr: &str) -> Result<String, String> {
         expr.to_string()
     };
 
-    Schedule::from_str(&normalized_expr)
-        .map(|_| normalized_expr)
-        .map_err(|e| format!("Invalid cron expression: {}", e))
+    // Validate using the same parser as the scheduler (tokio-cron-scheduler with Tokyo timezone)
+    Job::new_async_tz(normalized_expr.as_str(), Tokyo, |_uuid, _lock| {
+        Box::pin(async move {
+            // Validation only - this job is never executed
+        })
+    })
+    .map(|_| normalized_expr)
+    .map_err(|e| format!("Invalid cron expression: {}", e))
 }
 
 #[tauri::command]

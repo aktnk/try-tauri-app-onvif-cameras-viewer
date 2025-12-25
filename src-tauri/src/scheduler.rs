@@ -40,16 +40,6 @@ impl SchedulerManager {
 
         println!("[Scheduler] Adding schedule '{}' (ID: {}) with cron: {}", name, schedule_id, cron_expr);
 
-        // Debug: Try to parse the cron expression to see if it's valid
-        match Job::new_async_tz(cron_expr.as_str(), Tokyo, |_uuid, _lock| {
-            Box::pin(async move {
-                println!("[Scheduler] TEST JOB FIRED - This should not appear unless cron is working");
-            })
-        }) {
-            Ok(_) => println!("[Scheduler] Cron expression '{}' parsed successfully (JST timezone)", cron_expr),
-            Err(e) => println!("[Scheduler] ERROR: Failed to parse cron expression '{}': {:?}", cron_expr, e),
-        }
-
         let job = Job::new_async_tz(cron_expr.as_str(), Tokyo, move |_uuid, _lock| {
             let state_clone = state.clone();
             let camera_id = camera_id;
