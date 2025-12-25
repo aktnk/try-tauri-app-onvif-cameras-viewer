@@ -48,7 +48,7 @@ impl SchedulerManager {
             let name = name.clone();
 
             Box::pin(async move {
-                println!("[Scheduler] !!!!! EXECUTING SCHEDULE '{}' FOR CAMERA {} !!!!!", name, camera_id);
+                println!("[Scheduler] Executing schedule '{}' for camera {}", name, camera_id);
 
                 // Start scheduled recording
                 if let Err(e) = start_scheduled_recording(
