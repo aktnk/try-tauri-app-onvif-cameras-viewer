@@ -27,10 +27,14 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
     *   Automatic fallback to CPU encoding if GPU is unavailable.
 -   **Scheduled Recording** 🆕: Automate recording with flexible time-based scheduling.
     *   **Cron-based Scheduling**: Use cron expressions for flexible time patterns (e.g., daily at 9 AM, weekdays at 6 PM).
+    *   **Visual Cron Builder**: Intuitive UI for building cron expressions without manual syntax.
+    *   **Next Execution Display**: Shows the next scheduled recording time in real-time.
+    *   **Active/Inactive Status**: Color-coded status indicators (green for active, gray for inactive).
     *   **FPS Control**: Specify custom frame rates for scheduled recordings.
     *   **Duration Control**: Set recording duration in minutes.
-    *   **Enable/Disable**: Temporarily disable schedules without deletion.
+    *   **Enable/Disable Toggle**: Temporarily disable schedules without deletion.
     *   **Persistent Schedules**: Automatically resume enabled schedules after app restart.
+    *   **JST Timezone**: All schedules use Japan Standard Time (Asia/Tokyo).
 -   **Modern UI**: Built with React, Material Design principles, and styled with Tailwind CSS.
 
 ## Technology Stack
@@ -48,7 +52,7 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 *   **ONVIF Protocol**: Custom SOAP implementation for `GetProfiles`, `GetStreamUri`, PTZ (`ContinuousMove`, `Stop`), and Time Sync (`GetSystemDateAndTime`, `SetSystemDateAndTime`).
 *   **Video Processing**: [FFmpeg](https://ffmpeg.org/) for transcoding, recording, and thumbnail generation (requires system FFmpeg).
 *   **Hardware Acceleration**: Automatic GPU detection and encoder selection (Intel QSV, NVIDIA NVENC, AMD AMF, VA-API, VideoToolbox).
-*   **Task Scheduling**: [tokio-cron-scheduler](https://crates.io/crates/tokio-cron-scheduler) for automated recording schedules.
+*   **Task Scheduling**: [tokio-cron-scheduler](https://crates.io/crates/tokio-cron-scheduler) with [croner](https://crates.io/crates/croner) for automated recording schedules with JST timezone support.
 
 ## Getting Started
 
@@ -106,6 +110,7 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
         -   `commands.rs`: Tauri RPC command handlers
         -   `onvif.rs`: Custom ONVIF SOAP implementation
         -   `stream.rs`: FFmpeg streaming and recording control
+        -   `scheduler.rs`: Cron-based recording schedule management
         -   `gpu_detector.rs`: GPU hardware detection and encoder discovery
         -   `encoder.rs`: Encoder selection and configuration logic
         -   `lib.rs`: Application setup and initialization
