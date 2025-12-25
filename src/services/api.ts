@@ -237,3 +237,7 @@ export const deleteRecordingSchedule = async (id: number): Promise<void> => {
 export const toggleSchedule = async (id: number, enabled: boolean): Promise<RecordingSchedule> => {
   return await invoke('toggle_schedule', { id, enabled });
 };
+
+export const getRecordingCameras = async (): Promise<number[]> => {
+  return await invoke('get_recording_cameras');
+};

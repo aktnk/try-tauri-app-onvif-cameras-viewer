@@ -3,6 +3,7 @@ use crate::{AppState, models::RecordingSchedule};
 use std::sync::Arc;
 use std::collections::HashMap;
 use uuid::Uuid;
+use chrono_tz::Asia::Tokyo;
 
 pub struct SchedulerManager {
     scheduler: JobScheduler,
@@ -39,7 +40,17 @@ impl SchedulerManager {
 
         println!("[Scheduler] Adding schedule '{}' (ID: {}) with cron: {}", name, schedule_id, cron_expr);
 
-        let job = Job::new_async(cron_expr.as_str(), move |_uuid, _lock| {
+        // Debug: Try to parse the cron expression to see if it's valid
+        match Job::new_async_tz(cron_expr.as_str(), Tokyo, |_uuid, _lock| {
+            Box::pin(async move {
+                println!("[Scheduler] TEST JOB FIRED - This should not appear unless cron is working");
+            })
+        }) {
+            Ok(_) => println!("[Scheduler] Cron expression '{}' parsed successfully (JST timezone)", cron_expr),
+            Err(e) => println!("[Scheduler] ERROR: Failed to parse cron expression '{}': {:?}", cron_expr, e),
+        }
+
+        let job = Job::new_async_tz(cron_expr.as_str(), Tokyo, move |_uuid, _lock| {
             let state_clone = state.clone();
             let camera_id = camera_id;
             let duration = duration;
@@ -47,7 +58,7 @@ impl SchedulerManager {
             let name = name.clone();
 
             Box::pin(async move {
-                println!("[Scheduler] Executing schedule '{}' for camera {}", name, camera_id);
+                println!("[Scheduler] !!!!! EXECUTING SCHEDULE '{}' FOR CAMERA {} !!!!!", name, camera_id);
 
                 // Start scheduled recording
                 if let Err(e) = start_scheduled_recording(

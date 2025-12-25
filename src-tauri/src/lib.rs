@@ -23,6 +23,8 @@ pub struct AppState {
     pub processes: Arc<Mutex<HashMap<i32, Child>>>,
     pub recording_processes: Arc<Mutex<HashMap<i32, Child>>>,
     pub scheduler: Arc<tokio::sync::Mutex<scheduler::SchedulerManager>>,
+    // Map<schedule_id, camera_id> for active scheduled recordings
+    pub active_scheduled_recordings: Arc<tokio::sync::Mutex<HashMap<i32, i32>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -72,6 +74,7 @@ pub fn run() {
                 processes: Arc::new(Mutex::new(HashMap::new())),
                 recording_processes: Arc::new(Mutex::new(HashMap::new())),
                 scheduler: Arc::new(tokio::sync::Mutex::new(scheduler)),
+                active_scheduled_recordings: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             };
 
             // Manage state first
@@ -153,6 +156,7 @@ pub fn run() {
             commands::get_encoder_settings,
             commands::update_encoder_settings,
             commands::get_recording_schedules,
+            commands::get_recording_cameras,
             commands::add_recording_schedule,
             commands::update_recording_schedule,
             commands::delete_recording_schedule,
@@ -217,6 +221,7 @@ async fn load_enabled_schedules_from_app(app_handle: tauri::AppHandle) -> Result
         processes: state.processes.clone(),
         recording_processes: state.recording_processes.clone(),
         scheduler: state.scheduler.clone(),
+        active_scheduled_recordings: state.active_scheduled_recordings.clone(),
     });
 
     let scheduler = state.scheduler.lock().await;

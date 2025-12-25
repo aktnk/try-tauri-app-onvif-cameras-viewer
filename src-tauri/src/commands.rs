@@ -443,9 +443,16 @@ pub async fn update_encoder_settings(
 
 // ========== Recording Schedule Commands ==========
 
-fn validate_cron_expression(expr: &str) -> Result<(), String> {
-    Schedule::from_str(expr)
-        .map(|_| ())
+fn validate_cron_expression(expr: &str) -> Result<String, String> {
+    // Convert 5-field cron (minute hour day month dow) to 6-field (second minute hour day month dow)
+    let normalized_expr = if expr.split_whitespace().count() == 5 {
+        format!("0 {}", expr) // Add "0" seconds at the beginning
+    } else {
+        expr.to_string()
+    };
+
+    Schedule::from_str(&normalized_expr)
+        .map(|_| normalized_expr)
         .map_err(|e| format!("Invalid cron expression: {}", e))
 }
 
@@ -491,8 +498,8 @@ pub async fn add_recording_schedule(
     state: State<'_, AppState>,
     schedule: NewRecordingSchedule
 ) -> Result<RecordingSchedule, String> {
-    // Validate cron expression
-    validate_cron_expression(&schedule.cron_expression)?;
+    // Validate and normalize cron expression (5-field -> 6-field)
+    let normalized_cron = validate_cron_expression(&schedule.cron_expression)?;
 
     let conn = get_conn(&state)?;
 
@@ -502,7 +509,7 @@ pub async fn add_recording_schedule(
         (
             &schedule.camera_id,
             &schedule.name,
-            &schedule.cron_expression,
+            &normalized_cron,
             &schedule.duration_minutes,
             &schedule.fps,
             &schedule.is_enabled,
@@ -550,6 +557,7 @@ pub async fn add_recording_schedule(
             processes: state.processes.clone(),
             recording_processes: state.recording_processes.clone(),
             scheduler: state.scheduler.clone(),
+            active_scheduled_recordings: state.active_scheduled_recordings.clone(),
         });
 
         let scheduler = state.scheduler.lock().await;
@@ -567,10 +575,12 @@ pub async fn update_recording_schedule(
     id: i32,
     updates: UpdateRecordingSchedule
 ) -> Result<RecordingSchedule, String> {
-    // Validate cron expression if provided
-    if let Some(ref expr) = updates.cron_expression {
-        validate_cron_expression(expr)?;
-    }
+    // Validate and normalize cron expression if provided
+    let normalized_cron = if let Some(ref expr) = updates.cron_expression {
+        Some(validate_cron_expression(expr)?)
+    } else {
+        None
+    };
 
     let conn = get_conn(&state)?;
 
@@ -587,7 +597,7 @@ pub async fn update_recording_schedule(
                      (name, Utc::now().to_rfc3339(), id))
             .map_err(|e| e.to_string())?;
     }
-    if let Some(ref cron_expr) = updates.cron_expression {
+    if let Some(ref cron_expr) = normalized_cron {
         conn.execute("UPDATE recording_schedules SET cron_expression = ?1, updated_at = ?2 WHERE id = ?3",
                      (cron_expr, Utc::now().to_rfc3339(), id))
             .map_err(|e| e.to_string())?;
@@ -647,6 +657,7 @@ pub async fn update_recording_schedule(
             processes: state.processes.clone(),
             recording_processes: state.recording_processes.clone(),
             scheduler: state.scheduler.clone(),
+            active_scheduled_recordings: state.active_scheduled_recordings.clone(),
         });
 
         let scheduler = state.scheduler.lock().await;
@@ -708,4 +719,16 @@ pub async fn toggle_schedule(
             is_enabled: Some(enabled),
         }
     ).await
+}
+
+#[tauri::command]
+pub async fn get_recording_cameras(
+    state: State<'_, AppState>
+) -> Result<Vec<i32>, String> {
+    // Get list of camera IDs currently recording
+    let processes = state.recording_processes.lock()
+        .map_err(|e| format!("Failed to lock recording processes: {}", e))?;
+
+    let camera_ids: Vec<i32> = processes.keys().copied().collect();
+    Ok(camera_ids)
 }
