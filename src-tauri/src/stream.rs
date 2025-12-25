@@ -2,12 +2,14 @@ use crate::models::{Camera, EncoderSettings};
 use crate::AppState;
 use crate::gpu_detector::detect_gpu_capabilities;
 use crate::encoder::EncoderSelector;
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, Child};
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use tauri::State;
 use std::fs;
 use std::path::PathBuf;
 use rusqlite::Connection;
-use chrono::Utc;
+use chrono::{Utc, DateTime};
 
 // Windows-specific imports for hiding console window
 #[cfg(target_os = "windows")]
@@ -153,18 +155,35 @@ pub async fn start_recording_with_options(
     camera_id: i32,
     fps: Option<i32>
 ) -> Result<(), String> {
+    start_recording_internal(
+        &state.db_path,
+        &state.recording_processes,
+        &state.recording_dir,
+        camera_id,
+        fps
+    ).await
+}
+
+// Internal implementation shared by both Tauri commands and scheduler
+async fn start_recording_internal(
+    db_path: &str,
+    recording_processes: &Arc<Mutex<HashMap<i32, Child>>>,
+    recording_dir: &PathBuf,
+    camera_id: i32,
+    fps: Option<i32>
+) -> Result<(), String> {
     let id = camera_id;
 
     // Check if already recording
     {
-        let processes = state.recording_processes.lock().map_err(|e| e.to_string())?;
+        let processes = recording_processes.lock().map_err(|e| e.to_string())?;
         if processes.contains_key(&id) {
              return Err("Recording is already in progress".to_string());
         }
     }
 
     // Get camera info
-    let conn = get_conn(&state)?;
+    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
     let camera = {
         let mut stmt = conn.prepare(
             "SELECT id, name, type, host, port, user, pass, xaddr, stream_path, created_at, updated_at
@@ -172,6 +191,9 @@ pub async fn start_recording_with_options(
         ).map_err(|e| e.to_string())?;
 
         stmt.query_row([id], |row| {
+            let created_at_str: String = row.get(9)?;
+            let updated_at_str: String = row.get(10)?;
+
             Ok(Camera {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -182,8 +204,12 @@ pub async fn start_recording_with_options(
                 pass: row.get(6)?,
                 xaddr: row.get(7)?,
                 stream_path: row.get(8)?,
-                created_at: row.get::<_, String>(9)?.parse().unwrap(),
-                updated_at: row.get::<_, String>(10)?.parse().unwrap(),
+                created_at: DateTime::parse_from_rfc3339(&created_at_str)
+                    .unwrap_or(Utc::now().into())
+                    .with_timezone(&Utc),
+                updated_at: DateTime::parse_from_rfc3339(&updated_at_str)
+                    .unwrap_or(Utc::now().into())
+                    .with_timezone(&Utc),
             })
         }).map_err(|e| format!("Camera not found: {}", e))?
     };
@@ -195,10 +221,12 @@ pub async fn start_recording_with_options(
         (id, &temp_filename, Utc::now().to_rfc3339(), false),
     ).map_err(|e| e.to_string())?;
 
+    drop(conn);
+
     // Get the rtsp url
     let rtsp_url = get_rtsp_url(&camera).await?;
 
-    let temp_file_path = state.recording_dir.join(&temp_filename);
+    let temp_file_path = recording_dir.join(&temp_filename);
 
     println!("[Recording] Starting FFmpeg for camera {}: {}", id, rtsp_url);
     if let Some(target_fps) = fps {
@@ -206,7 +234,7 @@ pub async fn start_recording_with_options(
     }
 
     // Get encoder configuration
-    let encoder_selector = build_encoder_selector(&state).await?;
+    let encoder_selector = build_encoder_selector_from_path(db_path).await?;
     let encoder_config = encoder_selector.select_encoder_for_recording().await;
 
     println!("[Recording] Using encoder: {} (GPU: {})", encoder_config.codec, encoder_config.is_gpu);
@@ -254,7 +282,7 @@ pub async fn start_recording_with_options(
 
     // Save process
     {
-        let mut processes = state.recording_processes.lock().map_err(|e| e.to_string())?;
+        let mut processes = recording_processes.lock().map_err(|e| e.to_string())?;
         processes.insert(id, child);
     }
 
@@ -262,39 +290,69 @@ pub async fn start_recording_with_options(
 }
 
 pub async fn stop_recording(state: State<'_, AppState>, id: i32) -> Result<(), String> {
+    stop_recording_internal(
+        &state.db_path,
+        &state.recording_processes,
+        &state.recording_dir,
+        id
+    ).await
+}
+
+// Internal implementation shared by both Tauri commands and scheduler
+async fn stop_recording_internal(
+    db_path: &str,
+    recording_processes: &Arc<Mutex<HashMap<i32, Child>>>,
+    recording_dir: &PathBuf,
+    camera_id: i32
+) -> Result<(), String> {
+    let id = camera_id;
+
     // Stop process
     {
-        let mut processes = state.recording_processes.lock().map_err(|e| e.to_string())?;
+        let mut processes = recording_processes.lock().map_err(|e| e.to_string())?;
         if let Some(mut child) = processes.remove(&id) {
-            let _ = child.kill();
-            let _ = child.wait();
+            if let Err(e) = child.kill() {
+                eprintln!("[Recording] Warning: Failed to kill process: {}", e);
+            }
+
+            match child.wait() {
+                Ok(status) => {
+                    if !status.success() {
+                        println!("[Recording] FFmpeg exited with status: {}", status);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[Recording] Warning: Failed to wait for process: {}", e);
+                }
+            }
         } else {
              return Err("No active recording found for this camera".to_string());
         }
     }
 
-    let conn = get_conn(&state)?;
-    
+    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+
     // Find the active recording for this camera
     let mut stmt = conn.prepare("SELECT id, filename, start_time FROM recordings WHERE camera_id = ?1 AND is_finished = 0 ORDER BY start_time DESC LIMIT 1").map_err(|e| e.to_string())?;
-    
+
     let recording_info: Option<(i32, String, String)> = stmt.query_row([id], |row| {
         Ok((row.get(0)?, row.get(1)?, row.get(2)?))
     }).ok();
 
     if let Some((rec_id, temp_filename, start_time_str)) = recording_info {
-        let temp_path = state.recording_dir.join(&temp_filename);
-        
+        let temp_path = recording_dir.join(&temp_filename);
+
         if temp_path.exists() {
              // Generate final filename
-             let start_time = chrono::DateTime::parse_from_rfc3339(&start_time_str).unwrap_or(Utc::now().into()).with_timezone(&Utc);
+             let start_time = DateTime::parse_from_rfc3339(&start_time_str)
+                 .map_err(|e| format!("Invalid start_time: {}", e))?
+                 .with_timezone(&Utc);
              let final_filename = format!("rec_{}_{}.mp4", id, start_time.format("%Y%m%d_%H%M%S"));
-             let final_path = state.recording_dir.join(&final_filename);
+             let final_path = recording_dir.join(&final_filename);
 
-             println!("Converting recording {} to {}", temp_filename, final_filename);
+             println!("[Recording] Converting {} to {}", temp_filename, final_filename);
 
              // Convert TS to MP4 (remux)
-             // ffmpeg -i temp.ts -c copy final.mp4
              let mut cmd = Command::new("ffmpeg");
              cmd.args([
                     "-y",
@@ -319,11 +377,11 @@ pub async fn stop_recording(state: State<'_, AppState>, id: i32) -> Result<(), S
              }
 
              // Remove temp file
-             let _ = fs::remove_file(temp_path);
+             let _ = fs::remove_file(&temp_path);
 
              // Generate thumbnail
              let thumbnail_filename = final_filename.replace(".mp4", ".jpg");
-             let thumbnail_path = state.recording_dir.join("thumbnails").join(&thumbnail_filename);
+             let thumbnail_path = recording_dir.join("thumbnails").join(&thumbnail_filename);
 
              // Ensure thumbnails directory exists
              if let Some(parent) = thumbnail_path.parent() {
@@ -335,7 +393,7 @@ pub async fn stop_recording(state: State<'_, AppState>, id: i32) -> Result<(), S
              let thumbnail_db_value = match thumbnail_result {
                  Ok(_) => Some(thumbnail_filename),
                  Err(e) => {
-                     println!("[Thumbnail] Warning: Failed to generate thumbnail: {}", e);
+                     eprintln!("[Thumbnail] Warning: Failed to generate thumbnail: {}", e);
                      None
                  }
              };
@@ -345,6 +403,8 @@ pub async fn stop_recording(state: State<'_, AppState>, id: i32) -> Result<(), S
                 "UPDATE recordings SET is_finished = 1, filename = ?1, thumbnail = ?2, end_time = ?3 WHERE id = ?4",
                 (&final_filename, thumbnail_db_value, Utc::now().to_rfc3339(), rec_id)
              ).map_err(|e| e.to_string())?;
+
+             println!("[Recording] Recording saved: {}", final_filename);
         } else {
             // Temp file missing?
             conn.execute("DELETE FROM recordings WHERE id = ?1", [rec_id]).map_err(|e| e.to_string())?;
@@ -424,194 +484,22 @@ pub async fn start_recording_with_options_direct(
     camera_id: i32,
     fps: Option<i32>
 ) -> Result<(), String> {
-    let id = camera_id;
-
-    // Check if already recording
-    {
-        let processes = state.recording_processes.lock().map_err(|e| e.to_string())?;
-        if processes.contains_key(&id) {
-             return Err("Recording is already in progress".to_string());
-        }
-    }
-
-    // Get camera info
-    let conn = Connection::open(&state.db_path).map_err(|e| e.to_string())?;
-    let camera = {
-        let mut stmt = conn.prepare(
-            "SELECT id, name, type, host, port, user, pass, xaddr, stream_path, created_at, updated_at
-             FROM cameras WHERE id = ?1"
-        ).map_err(|e| e.to_string())?;
-
-        stmt.query_row([id], |row| {
-            Ok(Camera {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                camera_type: row.get(2)?,
-                host: row.get(3)?,
-                port: row.get(4)?,
-                user: row.get(5)?,
-                pass: row.get(6)?,
-                xaddr: row.get(7)?,
-                stream_path: row.get(8)?,
-                created_at: row.get::<_, String>(9)?.parse().unwrap(),
-                updated_at: row.get::<_, String>(10)?.parse().unwrap(),
-            })
-        }).map_err(|e| format!("Camera not found: {}", e))?
-    };
-
-    // Insert initial recording record
-    let temp_filename = format!("temp_rec_{}.ts", id);
-    conn.execute(
-        "INSERT INTO recordings (camera_id, filename, start_time, is_finished) VALUES (?1, ?2, ?3, ?4)",
-        (id, &temp_filename, Utc::now().to_rfc3339(), false),
-    ).map_err(|e| e.to_string())?;
-
-    drop(conn);
-
-    // Get the rtsp url
-    let rtsp_url = get_rtsp_url(&camera).await?;
-
-    let temp_file_path = state.recording_dir.join(&temp_filename);
-
-    println!("[Recording] Starting FFmpeg for camera {}: {}", id, rtsp_url);
-    if let Some(target_fps) = fps {
-        println!("[Recording] Target FPS: {}", target_fps);
-    }
-
-    // Get encoder configuration
-    let encoder_selector = build_encoder_selector_from_path(&state.db_path).await?;
-    let encoder_config = encoder_selector.select_encoder_for_recording().await;
-
-    println!("[Recording] Using encoder: {} (GPU: {})", encoder_config.codec, encoder_config.is_gpu);
-
-    // Build FFmpeg command
-    let mut args = vec![
-        "-y".to_string(),
-        "-rtsp_transport".to_string(), "tcp".to_string(),
-        "-i".to_string(), rtsp_url.clone(),
-    ];
-
-    // Add FPS filter if specified
-    if let Some(target_fps) = fps {
-        args.extend_from_slice(&[
-            "-r".to_string(),
-            target_fps.to_string(),
-        ]);
-    }
-
-    // Add encoder-specific arguments
-    args.extend(encoder_config.args);
-
-    // Add audio and output format
-    args.extend_from_slice(&[
-        "-c:a".to_string(), "aac".to_string(),
-        "-f".to_string(), "mpegts".to_string(),
-        temp_file_path.to_str().unwrap().to_string(),
-    ]);
-
-    // Spawn FFmpeg for recording
-    let mut cmd = Command::new("ffmpeg");
-    cmd.args(&args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
-
-    // Hide console window on Windows
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    let child = cmd.spawn()
-        .map_err(|e| format!("Failed to start recording ffmpeg: {}", e))?;
-
-    // Save process
-    {
-        let mut processes = state.recording_processes.lock().map_err(|e| e.to_string())?;
-        processes.insert(id, child);
-    }
-
-    Ok(())
+    start_recording_internal(
+        &state.db_path,
+        &state.recording_processes,
+        &state.recording_dir,
+        camera_id,
+        fps
+    ).await
 }
 
 pub async fn stop_recording_direct(state: &AppState, id: i32) -> Result<(), String> {
-    // Stop process
-    {
-        let mut processes = state.recording_processes.lock().map_err(|e| e.to_string())?;
-        if let Some(mut child) = processes.remove(&id) {
-            let _ = child.kill();
-            let _ = child.wait();
-        } else {
-             return Err("No active recording found for this camera".to_string());
-        }
-    }
-
-    let conn = Connection::open(&state.db_path).map_err(|e| e.to_string())?;
-
-    // Find the active recording for this camera
-    let mut stmt = conn.prepare("SELECT id, filename, start_time FROM recordings WHERE camera_id = ?1 AND is_finished = 0 ORDER BY start_time DESC LIMIT 1").map_err(|e| e.to_string())?;
-
-    let recording_info: Option<(i32, String, String)> = stmt.query_row([id], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-    }).ok();
-
-    if let Some((rec_id, temp_filename, start_time_str)) = recording_info {
-        let temp_path = state.recording_dir.join(&temp_filename);
-
-        if temp_path.exists() {
-            let start_time = chrono::DateTime::parse_from_rfc3339(&start_time_str).unwrap_or(Utc::now().into()).with_timezone(&Utc);
-            let final_filename = format!("rec_{}_{}.mp4", id, start_time.format("%Y%m%d_%H%M%S"));
-            let final_path = state.recording_dir.join(&final_filename);
-
-            // Convert TS to MP4
-            println!("[Recording] Converting {} to MP4...", temp_filename);
-            let mut cmd = Command::new("ffmpeg");
-            cmd.args([
-                   "-y",
-                   "-i", temp_path.to_str().unwrap(),
-                   "-c", "copy",
-                   "-movflags", "+faststart",
-                   final_path.to_str().unwrap()
-               ]);
-
-            #[cfg(target_os = "windows")]
-            {
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                cmd.creation_flags(CREATE_NO_WINDOW);
-            }
-
-            let output = cmd.output()
-               .map_err(|e| format!("Failed to remux recording: {}", e))?;
-
-            if !output.status.success() {
-                return Err(format!("FFmpeg remux failed: {}", String::from_utf8_lossy(&output.stderr)));
-            }
-
-            // Generate thumbnail
-            let thumbnail_filename = format!("thumb_{}_{}.jpg", id, start_time.format("%Y%m%d_%H%M%S"));
-            let thumbnail_path = state.recording_dir.join("thumbnails").join(&thumbnail_filename);
-            if let Err(e) = generate_thumbnail(&final_path, &thumbnail_path) {
-                eprintln!("[Recording] Failed to generate thumbnail: {}", e);
-            }
-
-            // Update database
-            conn.execute(
-                "UPDATE recordings SET filename = ?1, thumbnail = ?2, end_time = ?3, is_finished = 1 WHERE id = ?4",
-                (&final_filename, &thumbnail_filename, Utc::now().to_rfc3339(), rec_id),
-            ).map_err(|e| e.to_string())?;
-
-            // Remove temp file
-            let _ = std::fs::remove_file(&temp_path);
-
-            println!("[Recording] Recording saved: {}", final_filename);
-        } else {
-            return Err("Recording file not found".to_string());
-        }
-    } else {
-        return Err("No active recording found in database".to_string());
-    }
-
-    Ok(())
+    stop_recording_internal(
+        &state.db_path,
+        &state.recording_processes,
+        &state.recording_dir,
+        id
+    ).await
 }
 
 // Helper function to build encoder selector from db_path
