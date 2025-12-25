@@ -10,6 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use rusqlite::Connection;
 use chrono::{Utc, DateTime};
+use chrono_tz::Asia::Tokyo;
 
 // Windows-specific imports for hiding console window
 #[cfg(target_os = "windows")]
@@ -353,10 +354,10 @@ async fn stop_recording_internal(
         let temp_path = recording_dir.join(&temp_filename);
 
         if temp_path.exists() {
-             // Generate final filename
+             // Generate final filename using JST timezone
              let start_time = DateTime::parse_from_rfc3339(&start_time_str)
                  .map_err(|e| format!("Invalid start_time: {}", e))?
-                 .with_timezone(&Utc);
+                 .with_timezone(&Tokyo);
              let final_filename = format!("rec_{}_{}.mp4", id, start_time.format("%Y%m%d_%H%M%S"));
              let final_path = recording_dir.join(&final_filename);
 

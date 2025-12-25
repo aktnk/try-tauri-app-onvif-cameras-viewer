@@ -338,21 +338,16 @@ export default function ScheduleRecording({ onScheduleChanged }: ScheduleRecordi
                     />
                   </Box>
 
-                <Box mb={1}>
-                  <Typography variant="body2" color="text.secondary">
-                    <strong>Schedule:</strong> {formatCronDescription(schedule.cron_expression)}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    Cron: {schedule.cron_expression}
-                  </Typography>
-                </Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                  <strong>Schedule:</strong> {formatCronDescription(schedule.cron_expression)}
+                </Typography>
 
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
                   <strong>Duration:</strong> {schedule.duration_minutes} minutes
                 </Typography>
 
                 {schedule.fps && (
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
                     <strong>FPS:</strong> {schedule.fps}
                   </Typography>
                 )}
