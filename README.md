@@ -34,6 +34,7 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
     *   **Duration Control**: Set recording duration in minutes.
     *   **Enable/Disable Toggle**: Temporarily disable schedules without deletion.
     *   **Persistent Schedules**: Automatically resume enabled schedules after app restart.
+    *   **Auto-Update Recording List**: Recording list automatically updates when recording completes (no manual reload needed).
     *   **JST Timezone**: All schedules use Japan Standard Time (Asia/Tokyo).
 -   **Modern UI**: Built with React, Material Design principles, and styled with Tailwind CSS.
 
@@ -122,9 +123,10 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
     *   HLS.js configured for 30-second buffer with automatic error recovery.
     *   GPU-accelerated encoding automatically enabled when available.
     *   Keyframes forced every 2 seconds to prevent buffer holes.
-*   **Recording**: Fully functional (Record/Stop/Play with automatic thumbnail generation).
+*   **Recording**: Fully functional (Record/Stop/Play with automatic thumbnail generation and real-time list updates).
 *   **PTZ Control**: Implemented (Pan/Tilt/Zoom with UI feedback).
 *   **Time Synchronization**: Fully implemented (GetSystemDateAndTime/SetSystemDateAndTime).
+*   **Scheduled Recording**: Fully functional with cron-based automation and real-time UI updates.
 *   **Hardware Acceleration**: Fully implemented with automatic GPU detection and fallback.
     *   **CPU Usage Reduction**: ~70% reduction with GPU encoding (7-8% vs 20-30% per camera).
     *   **Supported Encoders**: Intel QSV, NVIDIA NVENC, AMD AMF, VA-API, VideoToolbox.

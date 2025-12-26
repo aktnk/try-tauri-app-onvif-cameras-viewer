@@ -126,8 +126,12 @@ pub async fn start_recording(state: State<'_, AppState>, id: i32) -> Result<serd
 }
 
 #[tauri::command]
-pub async fn stop_recording(state: State<'_, AppState>, id: i32) -> Result<serde_json::Value, String> {
-    crate::stream::stop_recording(state, id).await.map_err(|e| e.to_string())?;
+pub async fn stop_recording(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    id: i32
+) -> Result<serde_json::Value, String> {
+    crate::stream::stop_recording(state, app_handle, id).await.map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "success": true }))
 }
 
@@ -599,6 +603,7 @@ pub async fn add_recording_schedule(
             recording_processes: state.recording_processes.clone(),
             scheduler: state.scheduler.clone(),
             active_scheduled_recordings: state.active_scheduled_recordings.clone(),
+            app_handle: state.app_handle.clone(),
         });
 
         let scheduler = state.scheduler.lock().await;
@@ -722,6 +727,7 @@ pub async fn update_recording_schedule(
             recording_processes: state.recording_processes.clone(),
             scheduler: state.scheduler.clone(),
             active_scheduled_recordings: state.active_scheduled_recordings.clone(),
+            app_handle: state.app_handle.clone(),
         });
 
         let scheduler = state.scheduler.lock().await;

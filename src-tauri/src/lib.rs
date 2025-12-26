@@ -25,6 +25,7 @@ pub struct AppState {
     pub scheduler: Arc<tokio::sync::Mutex<scheduler::SchedulerManager>>,
     // Map<schedule_id, camera_id> for active scheduled recordings
     pub active_scheduled_recordings: Arc<tokio::sync::Mutex<HashMap<i32, i32>>>,
+    pub app_handle: tauri::AppHandle,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,10 +33,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let _app_handle = app.handle();
+            let app_handle = app.handle().clone();
             let app_dir = app.path().app_data_dir().expect("failed to get app data dir");
             std::fs::create_dir_all(&app_dir).expect("failed to create app data dir");
-            
+
             let db_path = app_dir.join("cameras.db");
             db::init_db(&db_path).expect("failed to init db");
 
@@ -75,6 +76,7 @@ pub fn run() {
                 recording_processes: Arc::new(Mutex::new(HashMap::new())),
                 scheduler: Arc::new(tokio::sync::Mutex::new(scheduler)),
                 active_scheduled_recordings: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                app_handle: app_handle.clone(),
             };
 
             // Manage state first
@@ -223,6 +225,7 @@ async fn load_enabled_schedules_from_app(app_handle: tauri::AppHandle) -> Result
         recording_processes: state.recording_processes.clone(),
         scheduler: state.scheduler.clone(),
         active_scheduled_recordings: state.active_scheduled_recordings.clone(),
+        app_handle: state.app_handle.clone(),
     });
 
     let scheduler = state.scheduler.lock().await;
