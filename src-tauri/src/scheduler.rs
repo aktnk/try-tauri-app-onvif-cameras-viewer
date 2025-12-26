@@ -128,5 +128,5 @@ async fn stop_scheduled_recording(
     state: Arc<AppState>,
     camera_id: i32
 ) -> Result<(), String> {
-    crate::stream::stop_recording_direct(&state, camera_id).await
+    crate::stream::stop_recording_direct(&state, camera_id, Some(&state.app_handle)).await
 }

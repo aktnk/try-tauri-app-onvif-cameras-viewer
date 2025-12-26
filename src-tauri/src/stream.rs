@@ -5,7 +5,7 @@ use crate::encoder::EncoderSelector;
 use std::process::{Command, Stdio, Child};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use tauri::State;
+use tauri::{State, Emitter};
 use std::fs;
 use std::path::PathBuf;
 use rusqlite::Connection;
@@ -300,12 +300,17 @@ async fn start_recording_internal(
     Ok(())
 }
 
-pub async fn stop_recording(state: State<'_, AppState>, id: i32) -> Result<(), String> {
+pub async fn stop_recording(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    id: i32
+) -> Result<(), String> {
     stop_recording_internal(
         &state.db_path,
         &state.recording_processes,
         &state.recording_dir,
-        id
+        id,
+        Some(&app_handle)
     ).await
 }
 
@@ -314,7 +319,8 @@ async fn stop_recording_internal(
     db_path: &str,
     recording_processes: &Arc<Mutex<HashMap<i32, Child>>>,
     recording_dir: &PathBuf,
-    camera_id: i32
+    camera_id: i32,
+    app_handle: Option<&tauri::AppHandle>
 ) -> Result<(), String> {
     let id = camera_id;
 
@@ -416,6 +422,15 @@ async fn stop_recording_internal(
              ).map_err(|e| e.to_string())?;
 
              println!("[Recording] Recording saved: {}", final_filename);
+
+             // Emit event to frontend to update recording list
+             if let Some(app) = app_handle {
+                 if let Err(e) = app.emit("recording-completed", camera_id) {
+                     eprintln!("[Event] Warning: Failed to emit recording-completed event: {}", e);
+                 } else {
+                     println!("[Event] Emitted recording-completed event for camera {}", camera_id);
+                 }
+             }
         } else {
             // Temp file missing?
             conn.execute("DELETE FROM recordings WHERE id = ?1", [rec_id]).map_err(|e| e.to_string())?;
@@ -504,12 +519,17 @@ pub async fn start_recording_with_options_direct(
     ).await
 }
 
-pub async fn stop_recording_direct(state: &AppState, id: i32) -> Result<(), String> {
+pub async fn stop_recording_direct(
+    state: &AppState,
+    id: i32,
+    app_handle: Option<&tauri::AppHandle>
+) -> Result<(), String> {
     stop_recording_internal(
         &state.db_path,
         &state.recording_processes,
         &state.recording_dir,
-        id
+        id,
+        app_handle
     ).await
 }
 

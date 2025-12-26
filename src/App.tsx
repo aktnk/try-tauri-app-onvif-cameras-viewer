@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AppBar, Toolbar, Typography, Container, CssBaseline, CircularProgress, Alert, Button, Modal, Paper, IconButton } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
+import { listen } from '@tauri-apps/api/event';
 import CameraList from './components/CameraList';
 import VideoPlayer from './components/VideoPlayer';
 import RecordingList from './components/RecordingList';
@@ -104,6 +105,33 @@ function App() {
     const idsToRestore = savedCameraIds ? JSON.parse(savedCameraIds) : undefined;
     fetchCameras(idsToRestore);
   }, [fetchCameras]);
+
+  // Listen for recording-completed events from backend
+  useEffect(() => {
+    const setupListener = async () => {
+      const unlisten = await listen('recording-completed', (event) => {
+        const cameraId = event.payload as number;
+        console.log(`[Event] Recording completed for camera ${cameraId}`);
+
+        // Update recording list
+        setRecordingListVersion(v => v + 1);
+      });
+
+      return unlisten;
+    };
+
+    let unlistenFn: (() => void) | null = null;
+
+    setupListener().then(fn => {
+      unlistenFn = fn;
+    });
+
+    return () => {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
 
 
   useEffect(() => {
