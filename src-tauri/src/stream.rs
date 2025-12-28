@@ -131,19 +131,75 @@ pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<
 }
 
 pub async fn stop_stream(state: State<'_, AppState>, id: i32) -> Result<(), String> {
-    let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
-    
-    if let Some(mut child) = processes.remove(&id) {
-        let _ = child.kill(); // Ignore error if already dead
-        let _ = child.wait(); // Clean up zombie
+    println!("[Stream] Stopping stream for camera {}", id);
+
+    // Stop streaming process
+    {
+        let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
+
+        if let Some(mut child) = processes.remove(&id) {
+            println!("[Stream] Killing streaming FFmpeg process for camera {}", id);
+
+            // Get PID before killing (for double-check)
+            let pid = child.id();
+
+            // Try to kill the process
+            if let Err(e) = child.kill() {
+                eprintln!("[Stream] Warning: Failed to kill FFmpeg process: {}", e);
+            }
+
+            // Wait for process to terminate
+            match child.wait() {
+                Ok(status) => {
+                    println!("[Stream] FFmpeg process exited with status: {}", status);
+                }
+                Err(e) => {
+                    eprintln!("[Stream] Warning: Failed to wait for FFmpeg process: {}", e);
+                }
+            }
+
+            // Double-check: Kill by process ID (Linux/Unix only)
+            #[cfg(unix)]
+            {
+                use std::process::Command as StdCommand;
+                let _ = StdCommand::new("kill")
+                    .args(&["-9", &pid.to_string()])
+                    .output();
+                println!("[Stream] Sent additional SIGKILL to PID {} for safety", pid);
+            }
+        } else {
+            println!("[Stream] No active streaming process found for camera {}", id);
+        }
     }
-    
+
+    // Also stop recording if active (user expects both to stop)
+    {
+        let mut recording_processes = state.recording_processes.lock().map_err(|e| e.to_string())?;
+
+        if let Some(mut child) = recording_processes.remove(&id) {
+            println!("[Stream] Stopping active recording for camera {}", id);
+            let _ = child.kill();
+            let _ = child.wait();
+
+            // Clean up recording database entry
+            // Note: This is a simplified cleanup - the recording will be marked as unfinished
+            // A full implementation might want to finalize the recording properly
+            if let Ok(conn) = Connection::open(&state.db_path) {
+                let _ = conn.execute(
+                    "DELETE FROM recordings WHERE camera_id = ?1 AND is_finished = 0",
+                    [id]
+                );
+                println!("[Stream] Cleaned up unfinished recording for camera {}", id);
+            }
+        }
+    }
+
     let stream_dir = state.stream_dir.join(id.to_string());
     if stream_dir.exists() {
         // Optional: clean up files after stop? Reference does it.
         // fs::remove_dir_all(&stream_dir).map_err(|e| e.to_string())?;
     }
-    
+
     Ok(())
 }
 
@@ -325,7 +381,7 @@ async fn stop_recording_internal(
     let id = camera_id;
 
     // Stop process
-    {
+    let process_was_running = {
         let mut processes = recording_processes.lock().map_err(|e| e.to_string())?;
         if let Some(mut child) = processes.remove(&id) {
             if let Err(e) = child.kill() {
@@ -342,10 +398,12 @@ async fn stop_recording_internal(
                     eprintln!("[Recording] Warning: Failed to wait for process: {}", e);
                 }
             }
+            true
         } else {
-             return Err("No active recording found for this camera".to_string());
+            println!("[Recording] No active recording process found for camera {}, checking database...", id);
+            false
         }
-    }
+    };
 
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
 
@@ -432,12 +490,19 @@ async fn stop_recording_internal(
                  }
              }
         } else {
-            // Temp file missing?
+            // Temp file missing - clean up DB entry
             conn.execute("DELETE FROM recordings WHERE id = ?1", [rec_id]).map_err(|e| e.to_string())?;
-            return Err("Recording temp file not found".to_string());
+            println!("[Recording] Warning: Recording temp file not found, cleaned up DB entry");
         }
     } else {
-        return Err("No active recording found in DB".to_string());
+        // No DB record found
+        if !process_was_running {
+            // Neither process nor DB record - already stopped or never started
+            println!("[Recording] No active recording found for camera {}, already stopped", id);
+            return Ok(());
+        }
+        // Process was running but no DB record - unexpected, but continue
+        println!("[Recording] Warning: Recording process was running but no DB record found for camera {}", id);
     }
 
     Ok(())

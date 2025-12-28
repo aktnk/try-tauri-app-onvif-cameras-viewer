@@ -604,6 +604,7 @@ pub async fn add_recording_schedule(
             scheduler: state.scheduler.clone(),
             active_scheduled_recordings: state.active_scheduled_recordings.clone(),
             app_handle: state.app_handle.clone(),
+            plugin_manager: state.plugin_manager.clone(),
         });
 
         let scheduler = state.scheduler.lock().await;
@@ -728,6 +729,7 @@ pub async fn update_recording_schedule(
             scheduler: state.scheduler.clone(),
             active_scheduled_recordings: state.active_scheduled_recordings.clone(),
             app_handle: state.app_handle.clone(),
+            plugin_manager: state.plugin_manager.clone(),
         });
 
         let scheduler = state.scheduler.lock().await;
