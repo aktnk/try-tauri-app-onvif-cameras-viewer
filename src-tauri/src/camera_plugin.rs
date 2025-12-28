@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 
 /// Information about a discovered camera
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CameraInfo {
     pub name: String,
     pub host: String,

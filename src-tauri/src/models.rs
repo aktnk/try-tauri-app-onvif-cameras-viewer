@@ -7,13 +7,17 @@ pub struct Camera {
     pub id: i32,
     pub name: String,
     #[serde(rename = "type")]
-    pub camera_type: String, // "onvif" or "rtsp"
+    pub camera_type: String, // "onvif", "rtsp", or "uvc"
     pub host: String,
     pub port: i32,
     pub user: Option<String>,
     pub pass: Option<String>,
     pub xaddr: Option<String>,
     pub stream_path: Option<String>,
+    // UVC-specific fields
+    pub device_path: Option<String>,   // Linux: /dev/video0
+    pub device_id: Option<String>,     // Windows: device GUID
+    pub device_index: Option<i32>,     // macOS: AVFoundation index
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -29,6 +33,10 @@ pub struct NewCamera {
     pub pass: Option<String>,
     pub xaddr: Option<String>,
     pub stream_path: Option<String>,
+    // UVC-specific fields
+    pub device_path: Option<String>,
+    pub device_id: Option<String>,
+    pub device_index: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

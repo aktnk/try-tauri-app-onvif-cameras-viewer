@@ -74,6 +74,7 @@ pub fn run() {
             // Initialize plugin manager and register plugins
             let mut plugin_manager = PluginManager::new();
             plugin_manager.register_plugin(Box::new(plugins::OnvifPlugin::new()));
+            plugin_manager.register_plugin(Box::new(plugins::UvcPlugin::new()));
             println!("[Init] Registered camera plugins: {:?}", plugin_manager.get_plugin_types());
 
             let state = AppState {

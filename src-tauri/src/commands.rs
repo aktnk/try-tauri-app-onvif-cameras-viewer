@@ -1,5 +1,5 @@
 use tauri::State;
-use crate::models::{Camera, NewCamera, Recording, DiscoveredDevice, PTZCapabilities, PTZMovement, PTZResult, CameraTimeInfo, TimeSyncResult, CameraCapabilities, EncoderSettings, UpdateEncoderSettings, RecordingSchedule, NewRecordingSchedule, UpdateRecordingSchedule};
+use crate::models::{Camera, NewCamera, Recording, PTZCapabilities, PTZMovement, PTZResult, CameraTimeInfo, TimeSyncResult, CameraCapabilities, EncoderSettings, UpdateEncoderSettings, RecordingSchedule, NewRecordingSchedule, UpdateRecordingSchedule};
 use crate::AppState;
 use crate::gpu_detector::{detect_gpu_capabilities, GpuCapabilities};
 use rusqlite::Connection;
@@ -15,8 +15,12 @@ fn get_conn(state: &State<AppState>) -> Result<Connection, String> {
 #[tauri::command]
 pub async fn get_cameras(state: State<'_, AppState>) -> Result<Vec<Camera>, String> {
     let conn = get_conn(&state)?;
-    let mut stmt = conn.prepare("SELECT id, name, type, host, port, user, pass, xaddr, stream_path, created_at, updated_at FROM cameras").map_err(|e| e.to_string())?;
-    
+    let mut stmt = conn.prepare(
+        "SELECT id, name, type, host, port, user, pass, xaddr, stream_path,
+                device_path, device_id, device_index, created_at, updated_at
+         FROM cameras"
+    ).map_err(|e| e.to_string())?;
+
     let cameras_iter = stmt.query_map([], |row| {
         Ok(Camera {
             id: row.get(0)?,
@@ -28,8 +32,11 @@ pub async fn get_cameras(state: State<'_, AppState>) -> Result<Vec<Camera>, Stri
             pass: row.get(6)?,
             xaddr: row.get(7)?,
             stream_path: row.get(8)?,
-            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
-            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+            device_path: row.get(9)?,
+            device_id: row.get(10)?,
+            device_index: row.get(11)?,
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(13)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
         })
     }).map_err(|e| e.to_string())?;
 
@@ -42,9 +49,14 @@ pub async fn get_cameras(state: State<'_, AppState>) -> Result<Vec<Camera>, Stri
 
 #[tauri::command]
 pub async fn add_camera(state: State<'_, AppState>, camera: NewCamera) -> Result<Camera, String> {
+    println!("[AddCamera] Received camera: name='{}', type='{}', device_path={:?}",
+             camera.name, camera.camera_type, camera.device_path);
+
     let conn = get_conn(&state)?;
     conn.execute(
-        "INSERT INTO cameras (name, type, host, port, user, pass, xaddr, stream_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO cameras (name, type, host, port, user, pass, xaddr, stream_path,
+                             device_path, device_id, device_index, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         (
             &camera.name,
             &camera.camera_type,
@@ -54,11 +66,14 @@ pub async fn add_camera(state: State<'_, AppState>, camera: NewCamera) -> Result
             &camera.pass,
             &camera.xaddr,
             &camera.stream_path,
+            &camera.device_path,
+            &camera.device_id,
+            &camera.device_index,
             Utc::now().to_rfc3339(),
             Utc::now().to_rfc3339(),
         ),
     ).map_err(|e| e.to_string())?;
-    
+
     let id = conn.last_insert_rowid() as i32;
     
     // Return the created camera (fetch it back or construct it)
@@ -73,6 +88,9 @@ pub async fn add_camera(state: State<'_, AppState>, camera: NewCamera) -> Result
         pass: camera.pass,
         xaddr: camera.xaddr,
         stream_path: camera.stream_path,
+        device_path: camera.device_path,
+        device_id: camera.device_id,
+        device_index: camera.device_index,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     })
@@ -86,9 +104,15 @@ pub async fn delete_camera(state: State<'_, AppState>, id: i32) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn discover_cameras() -> Result<Vec<DiscoveredDevice>, String> {
-    // TODO: Implement ONVIF discovery
-    crate::onvif::discover_devices().await.map_err(|e| e.to_string())
+pub async fn discover_cameras(state: State<'_, AppState>) -> Result<Vec<crate::camera_plugin::CameraInfo>, String> {
+    println!("[Discovery] Discovering cameras from all plugins...");
+
+    // Use plugin manager to discover cameras from all plugins
+    let plugin_cameras = state.plugin_manager.discover_all().await?;
+
+    println!("[Discovery] Found {} camera(s) total", plugin_cameras.len());
+
+    Ok(plugin_cameras)
 }
 
 #[tauri::command]

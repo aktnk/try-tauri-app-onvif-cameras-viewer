@@ -21,6 +21,9 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> Result<()> {
             pass TEXT,
             xaddr TEXT,
             stream_path TEXT,
+            device_path TEXT,
+            device_id TEXT,
+            device_index INTEGER,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )",

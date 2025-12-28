@@ -82,12 +82,45 @@ pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<
     println!("[Stream] Using encoder: {} (GPU: {})", encoder_config.codec, encoder_config.is_gpu);
 
     // Build FFmpeg command
-    let mut args = vec![
-        "-y".to_string(),
-        "-fflags".to_string(), "nobuffer".to_string(),
-        "-rtsp_transport".to_string(), "tcp".to_string(),
-        "-i".to_string(), rtsp_url.clone(),
-    ];
+    let mut args = vec!["-y".to_string()];
+
+    // Add input format and device arguments based on camera type
+    match camera.camera_type.as_str() {
+        "uvc" => {
+            // UVC camera - use device input
+            #[cfg(target_os = "linux")]
+            {
+                args.extend_from_slice(&[
+                    "-f".to_string(), "v4l2".to_string(),
+                    "-i".to_string(), rtsp_url.clone(),
+                ]);
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                args.extend_from_slice(&[
+                    "-f".to_string(), "dshow".to_string(),
+                    "-i".to_string(), format!("video={}", rtsp_url),
+                ]);
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                args.extend_from_slice(&[
+                    "-f".to_string(), "avfoundation".to_string(),
+                    "-i".to_string(), rtsp_url.clone(),
+                ]);
+            }
+        }
+        _ => {
+            // ONVIF/RTSP camera - use RTSP input
+            args.extend_from_slice(&[
+                "-fflags".to_string(), "nobuffer".to_string(),
+                "-rtsp_transport".to_string(), "tcp".to_string(),
+                "-i".to_string(), rtsp_url.clone(),
+            ]);
+        }
+    }
 
     // Add encoder-specific arguments
     args.extend(encoder_config.args);
@@ -243,13 +276,14 @@ async fn start_recording_internal(
     let camera = {
         let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, type, host, port, user, pass, xaddr, stream_path, created_at, updated_at
+            "SELECT id, name, type, host, port, user, pass, xaddr, stream_path,
+                    device_path, device_id, device_index, created_at, updated_at
              FROM cameras WHERE id = ?1"
         ).map_err(|e| e.to_string())?;
 
         stmt.query_row([id], |row| {
-            let created_at_str: String = row.get(9)?;
-            let updated_at_str: String = row.get(10)?;
+            let created_at_str: String = row.get(12)?;
+            let updated_at_str: String = row.get(13)?;
 
             Ok(Camera {
                 id: row.get(0)?,
@@ -261,6 +295,9 @@ async fn start_recording_internal(
                 pass: row.get(6)?,
                 xaddr: row.get(7)?,
                 stream_path: row.get(8)?,
+                device_path: row.get(9)?,
+                device_id: row.get(10)?,
+                device_index: row.get(11)?,
                 created_at: DateTime::parse_from_rfc3339(&created_at_str)
                     .unwrap_or(Utc::now().into())
                     .with_timezone(&Utc),
@@ -289,11 +326,44 @@ async fn start_recording_internal(
     println!("[Recording] Using encoder: {} (GPU: {})", encoder_config.codec, encoder_config.is_gpu);
 
     // Build FFmpeg command
-    let mut args = vec![
-        "-y".to_string(),
-        "-rtsp_transport".to_string(), "tcp".to_string(),
-        "-i".to_string(), rtsp_url.clone(),
-    ];
+    let mut args = vec!["-y".to_string()];
+
+    // Add input format and device arguments based on camera type
+    match camera.camera_type.as_str() {
+        "uvc" => {
+            // UVC camera - use device input
+            #[cfg(target_os = "linux")]
+            {
+                args.extend_from_slice(&[
+                    "-f".to_string(), "v4l2".to_string(),
+                    "-i".to_string(), rtsp_url.clone(),
+                ]);
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                args.extend_from_slice(&[
+                    "-f".to_string(), "dshow".to_string(),
+                    "-i".to_string(), format!("video={}", rtsp_url),
+                ]);
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                args.extend_from_slice(&[
+                    "-f".to_string(), "avfoundation".to_string(),
+                    "-i".to_string(), rtsp_url.clone(),
+                ]);
+            }
+        }
+        _ => {
+            // ONVIF/RTSP camera - use RTSP input
+            args.extend_from_slice(&[
+                "-rtsp_transport".to_string(), "tcp".to_string(),
+                "-i".to_string(), rtsp_url.clone(),
+            ]);
+        }
+    }
 
     // Add FPS filter if specified
     if let Some(target_fps) = fps {
@@ -509,26 +579,56 @@ async fn stop_recording_internal(
 }
 
 async fn get_rtsp_url(camera: &Camera) -> Result<String, String> {
-     if camera.camera_type == "onvif" {
-        // Use ONVIF protocol to get the stream URI
-        crate::onvif::get_onvif_stream_url(&camera).await
-    } else {
-        // RTSP Camera
-        let base_url = if let Some(path) = &camera.stream_path {
-            format!("rtsp://{}:{}{}", camera.host, camera.port, path)
-        } else {
-             // Default fallback for RTSP if no path? Should probably error or assume root
-            format!("rtsp://{}:{}/", camera.host, camera.port)
-        };
+    match camera.camera_type.as_str() {
+        "onvif" => {
+            // Use ONVIF protocol to get the stream URI
+            crate::onvif::get_onvif_stream_url(&camera).await
+        }
+        "uvc" => {
+            // For UVC cameras, return device path (not RTSP URL)
+            // This will be used as FFmpeg input device
+            #[cfg(target_os = "linux")]
+            {
+                camera.device_path.clone()
+                    .ok_or_else(|| "No device path for UVC camera".to_string())
+            }
 
-        if let (Some(user), Some(pass)) = (&camera.user, &camera.pass) {
-            if !user.is_empty() {
-                 Ok(base_url.replace("rtsp://", &format!("rtsp://{}:{}@", user, urlencoding::encode(pass))))
+            #[cfg(target_os = "windows")]
+            {
+                camera.device_id.clone()
+                    .ok_or_else(|| "No device ID for UVC camera".to_string())
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                camera.device_index
+                    .map(|idx| idx.to_string())
+                    .ok_or_else(|| "No device index for UVC camera".to_string())
+            }
+
+            #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+            {
+                Err("UVC cameras not supported on this platform".to_string())
+            }
+        }
+        _ => {
+            // RTSP Camera
+            let base_url = if let Some(path) = &camera.stream_path {
+                format!("rtsp://{}:{}{}", camera.host, camera.port, path)
+            } else {
+                // Default fallback for RTSP if no path
+                format!("rtsp://{}:{}/", camera.host, camera.port)
+            };
+
+            if let (Some(user), Some(pass)) = (&camera.user, &camera.pass) {
+                if !user.is_empty() {
+                    Ok(base_url.replace("rtsp://", &format!("rtsp://{}:{}@", user, urlencoding::encode(pass))))
+                } else {
+                    Ok(base_url)
+                }
             } else {
                 Ok(base_url)
             }
-        } else {
-            Ok(base_url)
         }
     }
 }
