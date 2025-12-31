@@ -162,6 +162,28 @@ pub async fn start_recording(state: State<'_, AppState>, id: i32) -> Result<serd
     let cameras = get_cameras(state.clone()).await?;
     let camera = cameras.into_iter().find(|c| c.id == id).ok_or("Camera not found")?;
 
+    // For UVC cameras: stop streaming if active (device can only be accessed by one process)
+    if camera.camera_type == "uvc" {
+        let was_streaming = {
+            let processes = state.processes.lock().map_err(|e| e.to_string())?;
+            processes.contains_key(&id)
+        };
+
+        if was_streaming {
+            println!("[Recording] UVC camera {} is streaming, stopping stream before recording", id);
+
+            // Stop current stream
+            if let Err(e) = crate::stream::stop_stream(state.clone(), id).await {
+                println!("[Recording] Warning: Failed to stop stream: {}", e);
+            }
+
+            // Wait for cleanup
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+            println!("[Recording] Stream stopped, starting recording for camera {}", id);
+        }
+    }
+
     crate::stream::start_recording(state, camera).await.map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "success": true }))
 }

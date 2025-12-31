@@ -163,6 +163,7 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
     *   **Metadata Filtering**: Automatically skips metadata-only devices.
     *   **Platform Support**: Linux (v4l2) fully tested, Windows/macOS detection stubs ready.
     *   **Performance**: No resampling overhead, optimal format selection (MJPEG > YUYV).
+    *   **Smart Device Management**: Auto-stops streaming when recording starts (v4l2 exclusive access).
 
 ## Contributing
 

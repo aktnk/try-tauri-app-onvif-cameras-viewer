@@ -91,8 +91,10 @@ pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<
             #[cfg(target_os = "linux")]
             {
                 args.extend_from_slice(&[
-                    "-fflags".to_string(), "nobuffer".to_string(),  // Minimize input buffering
+                    "-err_detect".to_string(), "ignore_err".to_string(),  // Ignore MJPEG decode errors (APP field issues)
+                    "-fflags".to_string(), "nobuffer+genpts".to_string(),  // Minimize buffering + generate timestamps
                     "-flags".to_string(), "low_delay".to_string(),   // Low delay mode
+                    "-avoid_negative_ts".to_string(), "make_zero".to_string(),  // Handle timestamp issues
                 ]);
 
                 // Use detected video format if available
@@ -372,13 +374,44 @@ async fn start_recording_internal(
     // Add input format and device arguments based on camera type
     match camera.camera_type.as_str() {
         "uvc" => {
-            // UVC camera - use device input
+            // UVC camera - use device input with detected settings
             #[cfg(target_os = "linux")]
             {
+                // Error handling flags for robust MJPEG decoding
+                args.extend_from_slice(&[
+                    "-err_detect".to_string(), "ignore_err".to_string(),  // Ignore MJPEG decode errors
+                    "-fflags".to_string(), "+genpts".to_string(),         // Generate timestamps
+                    "-avoid_negative_ts".to_string(), "make_zero".to_string(),  // Handle timestamp issues
+                ]);
+
+                // Use detected video format if available
+                if let Some(ref format) = camera.video_format {
+                    args.extend_from_slice(&[
+                        "-input_format".to_string(), format.clone(),
+                    ]);
+                }
+
+                // Use detected resolution if available
+                if let (Some(width), Some(height)) = (camera.video_width, camera.video_height) {
+                    args.extend_from_slice(&[
+                        "-video_size".to_string(), format!("{}x{}", width, height),
+                    ]);
+                }
+
+                // Use detected FPS if available
+                if let Some(fps) = camera.video_fps {
+                    args.extend_from_slice(&[
+                        "-framerate".to_string(), fps.to_string(),
+                    ]);
+                }
+
                 args.extend_from_slice(&[
                     "-f".to_string(), "v4l2".to_string(),
                     "-i".to_string(), rtsp_url.clone(),
                 ]);
+
+                println!("[Recording] UVC input: format={:?}, size={:?}x{:?}, fps={:?}",
+                    camera.video_format, camera.video_width, camera.video_height, camera.video_fps);
             }
 
             #[cfg(target_os = "windows")]
@@ -387,6 +420,7 @@ async fn start_recording_internal(
                     "-f".to_string(), "dshow".to_string(),
                     "-i".to_string(), format!("video={}", rtsp_url),
                 ]);
+                // TODO: Add format/resolution/fps detection for Windows
             }
 
             #[cfg(target_os = "macos")]
@@ -395,6 +429,7 @@ async fn start_recording_internal(
                     "-f".to_string(), "avfoundation".to_string(),
                     "-i".to_string(), rtsp_url.clone(),
                 ]);
+                // TODO: Add format/resolution/fps detection for macOS
             }
         }
         _ => {
