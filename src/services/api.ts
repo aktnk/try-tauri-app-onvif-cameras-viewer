@@ -11,6 +11,10 @@ export interface Camera {
   device_path?: string | null;  // UVC: /dev/video0
   device_id?: string | null;    // UVC: Windows device ID
   device_index?: number | null; // UVC: macOS device index
+  video_format?: string | null; // UVC: mjpeg/yuyv
+  video_width?: number | null;  // UVC: 1280
+  video_height?: number | null; // UVC: 720
+  video_fps?: number | null;    // UVC: 30
 }
 
 export type NewCamera = {
@@ -25,6 +29,10 @@ export type NewCamera = {
   device_path?: string;
   device_id?: string;
   device_index?: number;
+  video_format?: string;
+  video_width?: number;
+  video_height?: number;
+  video_fps?: number;
 };
 
 export const getCameras = async (): Promise<Camera[]> => {
@@ -49,6 +57,10 @@ export interface DiscoveredDevice {
   device_path?: string | null;  // UVC: /dev/video0
   device_id?: string | null;    // UVC: Windows device ID
   device_index?: number | null; // UVC: macOS device index
+  video_format?: string | null; // UVC: mjpeg/yuyv
+  video_width?: number | null;  // UVC: 1280
+  video_height?: number | null; // UVC: 720
+  video_fps?: number | null;    // UVC: 30
 }
 
 export const discoverCameras = async (): Promise<DiscoveredDevice[]> => {

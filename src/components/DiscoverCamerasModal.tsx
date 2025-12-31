@@ -97,6 +97,10 @@ const DiscoverCamerasModal: React.FC<DiscoverCamerasModalProps> = ({ open, onClo
         newCamera.device_path = selectedDevice.device_path || undefined;
         newCamera.device_id = selectedDevice.device_id || undefined;
         newCamera.device_index = selectedDevice.device_index || undefined;
+        newCamera.video_format = selectedDevice.video_format || undefined;
+        newCamera.video_width = selectedDevice.video_width || undefined;
+        newCamera.video_height = selectedDevice.video_height || undefined;
+        newCamera.video_fps = selectedDevice.video_fps || undefined;
       }
 
       console.log('[DiscoverCamerasModal] Adding camera:', JSON.stringify(newCamera, null, 2));

@@ -17,7 +17,9 @@ pub async fn get_cameras(state: State<'_, AppState>) -> Result<Vec<Camera>, Stri
     let conn = get_conn(&state)?;
     let mut stmt = conn.prepare(
         "SELECT id, name, type, host, port, user, pass, xaddr, stream_path,
-                device_path, device_id, device_index, created_at, updated_at
+                device_path, device_id, device_index,
+                video_format, video_width, video_height, video_fps,
+                created_at, updated_at
          FROM cameras"
     ).map_err(|e| e.to_string())?;
 
@@ -35,8 +37,12 @@ pub async fn get_cameras(state: State<'_, AppState>) -> Result<Vec<Camera>, Stri
             device_path: row.get(9)?,
             device_id: row.get(10)?,
             device_index: row.get(11)?,
-            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(12)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
-            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(13)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+            video_format: row.get(12)?,
+            video_width: row.get(13)?,
+            video_height: row.get(14)?,
+            video_fps: row.get(15)?,
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(16)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(17)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
         })
     }).map_err(|e| e.to_string())?;
 
@@ -53,12 +59,15 @@ pub async fn add_camera(state: State<'_, AppState>, camera: NewCamera) -> Result
              camera.name, camera.camera_type, camera.device_path);
 
     let conn = get_conn(&state)?;
+    let now = Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO cameras (name, type, host, port, user, pass, xaddr, stream_path,
-                             device_path, device_id, device_index, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-        (
-            &camera.name,
+                             device_path, device_id, device_index,
+                             video_format, video_width, video_height, video_fps,
+                             created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        &[
+            &camera.name as &dyn rusqlite::ToSql,
             &camera.camera_type,
             &camera.host,
             &camera.port,
@@ -69,9 +78,13 @@ pub async fn add_camera(state: State<'_, AppState>, camera: NewCamera) -> Result
             &camera.device_path,
             &camera.device_id,
             &camera.device_index,
-            Utc::now().to_rfc3339(),
-            Utc::now().to_rfc3339(),
-        ),
+            &camera.video_format,
+            &camera.video_width,
+            &camera.video_height,
+            &camera.video_fps,
+            &now,
+            &now,
+        ] as &[&dyn rusqlite::ToSql],
     ).map_err(|e| e.to_string())?;
 
     let id = conn.last_insert_rowid() as i32;
@@ -91,6 +104,10 @@ pub async fn add_camera(state: State<'_, AppState>, camera: NewCamera) -> Result
         device_path: camera.device_path,
         device_id: camera.device_id,
         device_index: camera.device_index,
+        video_format: camera.video_format,
+        video_width: camera.video_width,
+        video_height: camera.video_height,
+        video_fps: camera.video_fps,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     })

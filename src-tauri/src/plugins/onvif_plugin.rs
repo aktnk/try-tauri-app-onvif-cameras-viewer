@@ -42,6 +42,10 @@ impl CameraPlugin for OnvifPlugin {
                 device_path: None,
                 device_id: None,
                 device_index: None,
+                video_format: None,
+                video_width: None,
+                video_height: None,
+                video_fps: None,
             })
             .collect();
 

@@ -75,11 +75,11 @@ pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<
 
     println!("[Stream] Starting FFmpeg for camera {}: {}", id, rtsp_url);
 
-    // Get encoder configuration
+    // Get encoder configuration with camera FPS
     let encoder_selector = build_encoder_selector(&state).await?;
-    let encoder_config = encoder_selector.select_encoder_for_streaming().await;
+    let encoder_config = encoder_selector.select_encoder_for_streaming(camera.video_fps).await;
 
-    println!("[Stream] Using encoder: {} (GPU: {})", encoder_config.codec, encoder_config.is_gpu);
+    println!("[Stream] Using encoder: {} (GPU: {}) with FPS: {:?}", encoder_config.codec, encoder_config.is_gpu, camera.video_fps);
 
     // Build FFmpeg command
     let mut args = vec!["-y".to_string()];
@@ -87,29 +87,64 @@ pub async fn start_stream(state: State<'_, AppState>, camera: Camera) -> Result<
     // Add input format and device arguments based on camera type
     match camera.camera_type.as_str() {
         "uvc" => {
-            // UVC camera - use device input
+            // UVC camera - use device input with detected settings
             #[cfg(target_os = "linux")]
             {
+                args.extend_from_slice(&[
+                    "-fflags".to_string(), "nobuffer".to_string(),  // Minimize input buffering
+                    "-flags".to_string(), "low_delay".to_string(),   // Low delay mode
+                ]);
+
+                // Use detected video format if available
+                if let Some(ref format) = camera.video_format {
+                    args.extend_from_slice(&[
+                        "-input_format".to_string(), format.clone(),
+                    ]);
+                }
+
+                // Use detected resolution if available
+                if let (Some(width), Some(height)) = (camera.video_width, camera.video_height) {
+                    args.extend_from_slice(&[
+                        "-video_size".to_string(), format!("{}x{}", width, height),
+                    ]);
+                }
+
+                // Use detected FPS if available
+                if let Some(fps) = camera.video_fps {
+                    args.extend_from_slice(&[
+                        "-framerate".to_string(), fps.to_string(),
+                    ]);
+                }
+
                 args.extend_from_slice(&[
                     "-f".to_string(), "v4l2".to_string(),
                     "-i".to_string(), rtsp_url.clone(),
                 ]);
+
+                println!("[Stream] UVC input: format={:?}, size={:?}x{:?}, fps={:?}",
+                    camera.video_format, camera.video_width, camera.video_height, camera.video_fps);
             }
 
             #[cfg(target_os = "windows")]
             {
                 args.extend_from_slice(&[
+                    "-fflags".to_string(), "nobuffer".to_string(),
+                    "-flags".to_string(), "low_delay".to_string(),
                     "-f".to_string(), "dshow".to_string(),
                     "-i".to_string(), format!("video={}", rtsp_url),
                 ]);
+                // TODO: Add format/resolution/fps detection for Windows
             }
 
             #[cfg(target_os = "macos")]
             {
                 args.extend_from_slice(&[
+                    "-fflags".to_string(), "nobuffer".to_string(),
+                    "-flags".to_string(), "low_delay".to_string(),
                     "-f".to_string(), "avfoundation".to_string(),
                     "-i".to_string(), rtsp_url.clone(),
                 ]);
+                // TODO: Add format/resolution/fps detection for macOS
             }
         }
         _ => {
@@ -277,13 +312,15 @@ async fn start_recording_internal(
         let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, name, type, host, port, user, pass, xaddr, stream_path,
-                    device_path, device_id, device_index, created_at, updated_at
+                    device_path, device_id, device_index,
+                    video_format, video_width, video_height, video_fps,
+                    created_at, updated_at
              FROM cameras WHERE id = ?1"
         ).map_err(|e| e.to_string())?;
 
         stmt.query_row([id], |row| {
-            let created_at_str: String = row.get(12)?;
-            let updated_at_str: String = row.get(13)?;
+            let created_at_str: String = row.get(16)?;
+            let updated_at_str: String = row.get(17)?;
 
             Ok(Camera {
                 id: row.get(0)?,
@@ -298,6 +335,10 @@ async fn start_recording_internal(
                 device_path: row.get(9)?,
                 device_id: row.get(10)?,
                 device_index: row.get(11)?,
+                video_format: row.get(12)?,
+                video_width: row.get(13)?,
+                video_height: row.get(14)?,
+                video_fps: row.get(15)?,
                 created_at: DateTime::parse_from_rfc3339(&created_at_str)
                     .unwrap_or(Utc::now().into())
                     .with_timezone(&Utc),

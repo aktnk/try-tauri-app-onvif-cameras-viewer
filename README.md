@@ -4,10 +4,13 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 
 ## Features
 
--   **Multi-Camera Type Support**: Manage both ONVIF and RTSP cameras.
-    *   **ONVIF Cameras**: Discover, add, and stream.
-    *   **RTSP Cameras**: Add and stream.
--   **Camera Discovery**: Automatically discover ONVIF cameras on your local network using **Unicast WS-Discovery** (subnet scanning).
+-   **Multi-Camera Type Support**: Manage ONVIF, RTSP, and UVC cameras.
+    *   **ONVIF Cameras**: Discover, add, and stream with PTZ control and time sync.
+    *   **RTSP Cameras**: Add and stream generic RTSP cameras.
+    *   **UVC Cameras** 🆕: USB Video Class (webcam) support with automatic format detection.
+-   **Camera Discovery**: Automatically discover cameras on your local network and system.
+    *   **ONVIF**: Unicast WS-Discovery (subnet scanning).
+    *   **UVC**: Automatic detection of USB webcams (Linux v4l2, Windows DirectShow, macOS AVFoundation).
 -   **Camera Management**: Register, update, delete, and list cameras.
 -   **Live Streaming**: View live HLS streams from cameras. FFmpeg handles RTSP to HLS transcoding (H.264/AAC) on the backend to ensure compatibility with modern browsers.
 -   **Recording**: Record live streams directly to your local disk.
@@ -25,6 +28,12 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
     *   Supports Intel QSV, NVIDIA NVENC, AMD AMF, VA-API, and VideoToolbox.
     *   Reduces CPU usage by up to 70% compared to software encoding.
     *   Automatic fallback to CPU encoding if GPU is unavailable.
+-   **UVC Camera Optimization** 🆕: Intelligent format and FPS detection for webcams.
+    *   **Auto-Detection**: Automatically detects optimal video format (MJPEG preferred over raw YUYV).
+    *   **Native FPS**: Streams at camera's native frame rate (no CPU-intensive resampling).
+    *   **Dynamic Keyframes**: Keyframe interval adjusts based on camera FPS for consistent 2-second segments.
+    *   **Multi-Resolution Support**: Automatically selects highest supported resolution and frame rate.
+    *   **Platform Support**: Linux (v4l2), Windows (DirectShow), macOS (AVFoundation).
 -   **Scheduled Recording** 🆕: Automate recording with flexible time-based scheduling.
     *   **Cron-based Scheduling**: Use cron expressions for flexible time patterns (e.g., daily at 9 AM, weekdays at 6 PM).
     *   **Visual Cron Builder**: Intuitive UI for building cron expressions without manual syntax.
@@ -50,7 +59,9 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 *   **Language**: [Rust](https://www.rust-lang.org/)
 *   **Database**: [SQLite3](https://www.sqlite.org/index.html) with `rusqlite` crate.
 *   **Local Server**: [Axum](https://docs.rs/axum/latest/axum/) for serving HLS streams and recording files.
-*   **ONVIF Protocol**: Custom SOAP implementation for `GetProfiles`, `GetStreamUri`, PTZ (`ContinuousMove`, `Stop`), and Time Sync (`GetSystemDateAndTime`, `SetSystemDateAndTime`).
+*   **Plugin Architecture**: Extensible camera plugin system supporting multiple camera types.
+    *   **ONVIF Plugin**: Custom SOAP implementation for `GetProfiles`, `GetStreamUri`, PTZ, and Time Sync.
+    *   **UVC Plugin**: USB Video Class camera support with v4l2/DirectShow/AVFoundation.
 *   **Video Processing**: [FFmpeg](https://ffmpeg.org/) for transcoding, recording, and thumbnail generation (requires system FFmpeg).
 *   **Hardware Acceleration**: Automatic GPU detection and encoder selection (Intel QSV, NVIDIA NVENC, AMD AMF, VA-API, VideoToolbox).
 *   **Task Scheduling**: [tokio-cron-scheduler](https://crates.io/crates/tokio-cron-scheduler) with [croner](https://crates.io/crates/croner) for automated recording schedules with JST timezone support.
@@ -63,6 +74,10 @@ This is a desktop application built with Tauri, designed to manage and view ONVI
 *   [npm](https://www.npmjs.com/)
 *   [Rust](https://www.rust-lang.org/tools/install) (with `rustup`)
 *   [FFmpeg](https://ffmpeg.org/download.html) must be installed on your system and available in the system's PATH.
+*   **(Linux)** `v4l2-utils` for UVC camera detection:
+    ```bash
+    sudo apt install v4l-utils  # Ubuntu/Debian
+    ```
 *   **(Optional)** GPU drivers for hardware acceleration:
     *   **Intel**: `intel-media-va-driver`, `libva2`, `vainfo` (Linux)
     *   **NVIDIA**: Latest NVIDIA drivers with NVENC support
@@ -109,7 +124,11 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
         -   `db.rs`: SQLite database operations
         -   `models.rs`: Data structures and types
         -   `commands.rs`: Tauri RPC command handlers
-        -   `onvif.rs`: Custom ONVIF SOAP implementation
+        -   `camera_plugin.rs`: Plugin architecture trait and plugin manager
+        -   `/plugins`: Camera type implementations
+            -   `onvif_plugin.rs`: ONVIF camera plugin with custom SOAP implementation
+            -   `uvc_plugin.rs`: UVC (USB webcam) camera plugin with v4l2/DirectShow/AVFoundation
+        -   `onvif.rs`: ONVIF SOAP protocol utilities
         -   `stream.rs`: FFmpeg streaming and recording control
         -   `scheduler.rs`: Cron-based recording schedule management
         -   `gpu_detector.rs`: GPU hardware detection and encoder discovery
@@ -118,14 +137,18 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
 
 ## Current Status & Known Issues
 
-*   **Discovery**: Unicast ONVIF device discovery is functional.
-*   **Streaming**: Optimized for low-latency with proper keyframe handling. Supports up to 4 simultaneous camera streams.
-    *   HLS.js configured for 30-second buffer with automatic error recovery.
-    *   GPU-accelerated encoding automatically enabled when available.
-    *   Keyframes forced every 2 seconds to prevent buffer holes.
+*   **Discovery**:
+    *   **ONVIF**: Unicast device discovery is functional.
+    *   **UVC**: Fully functional with automatic format/resolution/FPS detection.
+*   **Streaming**: Optimized for low-latency with intelligent format handling.
+    *   **Multi-Camera Support**: Supports up to 4 simultaneous camera streams.
+    *   **HLS Configuration**: 10-second buffer with automatic error recovery.
+    *   **GPU Acceleration**: Automatically enabled when available.
+    *   **Dynamic Keyframes**: Keyframe interval adjusts per camera FPS (e.g., 10fps = 20 frames, 30fps = 60 frames) for consistent 2-second segments.
+    *   **UVC Optimization**: Native FPS streaming (no resampling), MJPEG preferred over YUYV.
 *   **Recording**: Fully functional (Record/Stop/Play with automatic thumbnail generation and real-time list updates).
-*   **PTZ Control**: Implemented (Pan/Tilt/Zoom with UI feedback).
-*   **Time Synchronization**: Fully implemented (GetSystemDateAndTime/SetSystemDateAndTime).
+*   **PTZ Control**: Implemented for ONVIF cameras (Pan/Tilt/Zoom with UI feedback).
+*   **Time Synchronization**: Fully implemented for ONVIF cameras (GetSystemDateAndTime/SetSystemDateAndTime).
 *   **Scheduled Recording**: Fully functional with cron-based automation and real-time UI updates.
 *   **Hardware Acceleration**: Fully implemented with automatic GPU detection and fallback.
     *   **CPU Usage Reduction**: ~70% reduction with GPU encoding (7-8% vs 20-30% per camera).
@@ -135,6 +158,11 @@ The bundled application will be found in `src-tauri/target/release/bundle/`.
         -   **Auto Mode**: Automatically uses GPU if available, falls back to CPU if GPU test fails
         -   **GPU Only Mode**: Forces GPU encoding (fails if GPU unavailable)
         -   **CPU Only Mode**: Always uses CPU encoding
+*   **UVC Camera Support** 🆕: Fully functional with automatic optimization.
+    *   **Auto-Detection**: Format, resolution, and FPS detected via v4l2-ctl (Linux).
+    *   **Metadata Filtering**: Automatically skips metadata-only devices.
+    *   **Platform Support**: Linux (v4l2) fully tested, Windows/macOS detection stubs ready.
+    *   **Performance**: No resampling overhead, optimal format selection (MJPEG > YUYV).
 
 ## Contributing
 

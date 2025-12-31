@@ -15,6 +15,11 @@ pub struct CameraInfo {
     pub device_path: Option<String>,      // Linux: /dev/video0
     pub device_id: Option<String>,        // Windows: device GUID
     pub device_index: Option<u32>,        // macOS: AVFoundation index
+    // UVC video settings (auto-detected)
+    pub video_format: Option<String>,     // 'mjpeg' or 'yuyv'
+    pub video_width: Option<i32>,         // e.g., 1280
+    pub video_height: Option<i32>,        // e.g., 720
+    pub video_fps: Option<i32>,           // e.g., 30
 }
 
 /// PTZ movement direction

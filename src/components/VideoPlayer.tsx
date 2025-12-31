@@ -22,11 +22,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ streamUrl }) => {
           manifestLoadingRetryDelay: 1000,
 
           // Low latency live streaming optimizations
-          liveSyncDurationCount: 3,        // Keep close to live edge (3 segments)
-          liveMaxLatencyDurationCount: 10, // Max latency before seeking back to live
-          maxBufferLength: 30,             // Max buffer size in seconds (increased to match FFmpeg)
-          maxMaxBufferLength: 60,          // Absolute max buffer (increased)
-          maxBufferSize: 60 * 1000 * 1000, // 60 MB max buffer size (increased)
+          liveSyncDurationCount: 1,        // Keep close to live edge (1 segment = minimal latency)
+          liveMaxLatencyDurationCount: 5,  // Max latency before seeking back to live (reduced)
+          maxBufferLength: 10,             // Max buffer size in seconds (reduced for low latency)
+          maxMaxBufferLength: 20,          // Absolute max buffer (reduced)
+          maxBufferSize: 20 * 1000 * 1000, // 20 MB max buffer size (reduced)
 
           // Improve segment loading for live streams
           manifestLoadingTimeOut: 10000,
@@ -34,7 +34,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ streamUrl }) => {
           fragLoadingTimeOut: 20000,
 
           // Low latency mode
-          backBufferLength: 60,            // Keep 60 seconds of back buffer (increased)
+          backBufferLength: 10,            // Keep 10 seconds of back buffer (reduced for low latency)
         };
         hls = new Hls(hlsConfig);
         hls.loadSource(streamUrl);
