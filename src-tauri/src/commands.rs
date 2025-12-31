@@ -1,5 +1,5 @@
 use tauri::State;
-use crate::models::{Camera, NewCamera, Recording, DiscoveredDevice, PTZCapabilities, PTZMovement, PTZResult, CameraTimeInfo, TimeSyncResult, CameraCapabilities, EncoderSettings, UpdateEncoderSettings, RecordingSchedule, NewRecordingSchedule, UpdateRecordingSchedule};
+use crate::models::{Camera, NewCamera, Recording, PTZCapabilities, PTZMovement, PTZResult, CameraTimeInfo, TimeSyncResult, CameraCapabilities, EncoderSettings, UpdateEncoderSettings, RecordingSchedule, NewRecordingSchedule, UpdateRecordingSchedule};
 use crate::AppState;
 use crate::gpu_detector::{detect_gpu_capabilities, GpuCapabilities};
 use rusqlite::Connection;
@@ -15,8 +15,14 @@ fn get_conn(state: &State<AppState>) -> Result<Connection, String> {
 #[tauri::command]
 pub async fn get_cameras(state: State<'_, AppState>) -> Result<Vec<Camera>, String> {
     let conn = get_conn(&state)?;
-    let mut stmt = conn.prepare("SELECT id, name, type, host, port, user, pass, xaddr, stream_path, created_at, updated_at FROM cameras").map_err(|e| e.to_string())?;
-    
+    let mut stmt = conn.prepare(
+        "SELECT id, name, type, host, port, user, pass, xaddr, stream_path,
+                device_path, device_id, device_index,
+                video_format, video_width, video_height, video_fps,
+                created_at, updated_at
+         FROM cameras"
+    ).map_err(|e| e.to_string())?;
+
     let cameras_iter = stmt.query_map([], |row| {
         Ok(Camera {
             id: row.get(0)?,
@@ -28,8 +34,15 @@ pub async fn get_cameras(state: State<'_, AppState>) -> Result<Vec<Camera>, Stri
             pass: row.get(6)?,
             xaddr: row.get(7)?,
             stream_path: row.get(8)?,
-            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
-            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+            device_path: row.get(9)?,
+            device_id: row.get(10)?,
+            device_index: row.get(11)?,
+            video_format: row.get(12)?,
+            video_width: row.get(13)?,
+            video_height: row.get(14)?,
+            video_fps: row.get(15)?,
+            created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(16)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
+            updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(17)?).unwrap_or(Utc::now().into()).with_timezone(&Utc),
         })
     }).map_err(|e| e.to_string())?;
 
@@ -42,11 +55,19 @@ pub async fn get_cameras(state: State<'_, AppState>) -> Result<Vec<Camera>, Stri
 
 #[tauri::command]
 pub async fn add_camera(state: State<'_, AppState>, camera: NewCamera) -> Result<Camera, String> {
+    println!("[AddCamera] Received camera: name='{}', type='{}', device_path={:?}",
+             camera.name, camera.camera_type, camera.device_path);
+
     let conn = get_conn(&state)?;
+    let now = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO cameras (name, type, host, port, user, pass, xaddr, stream_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        (
-            &camera.name,
+        "INSERT INTO cameras (name, type, host, port, user, pass, xaddr, stream_path,
+                             device_path, device_id, device_index,
+                             video_format, video_width, video_height, video_fps,
+                             created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        &[
+            &camera.name as &dyn rusqlite::ToSql,
             &camera.camera_type,
             &camera.host,
             &camera.port,
@@ -54,11 +75,18 @@ pub async fn add_camera(state: State<'_, AppState>, camera: NewCamera) -> Result
             &camera.pass,
             &camera.xaddr,
             &camera.stream_path,
-            Utc::now().to_rfc3339(),
-            Utc::now().to_rfc3339(),
-        ),
+            &camera.device_path,
+            &camera.device_id,
+            &camera.device_index,
+            &camera.video_format,
+            &camera.video_width,
+            &camera.video_height,
+            &camera.video_fps,
+            &now,
+            &now,
+        ] as &[&dyn rusqlite::ToSql],
     ).map_err(|e| e.to_string())?;
-    
+
     let id = conn.last_insert_rowid() as i32;
     
     // Return the created camera (fetch it back or construct it)
@@ -73,6 +101,13 @@ pub async fn add_camera(state: State<'_, AppState>, camera: NewCamera) -> Result
         pass: camera.pass,
         xaddr: camera.xaddr,
         stream_path: camera.stream_path,
+        device_path: camera.device_path,
+        device_id: camera.device_id,
+        device_index: camera.device_index,
+        video_format: camera.video_format,
+        video_width: camera.video_width,
+        video_height: camera.video_height,
+        video_fps: camera.video_fps,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     })
@@ -86,9 +121,15 @@ pub async fn delete_camera(state: State<'_, AppState>, id: i32) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn discover_cameras() -> Result<Vec<DiscoveredDevice>, String> {
-    // TODO: Implement ONVIF discovery
-    crate::onvif::discover_devices().await.map_err(|e| e.to_string())
+pub async fn discover_cameras(state: State<'_, AppState>) -> Result<Vec<crate::camera_plugin::CameraInfo>, String> {
+    println!("[Discovery] Discovering cameras from all plugins...");
+
+    // Use plugin manager to discover cameras from all plugins
+    let plugin_cameras = state.plugin_manager.discover_all().await?;
+
+    println!("[Discovery] Found {} camera(s) total", plugin_cameras.len());
+
+    Ok(plugin_cameras)
 }
 
 #[tauri::command]
@@ -120,6 +161,28 @@ pub async fn stop_stream(state: State<'_, AppState>, id: i32) -> Result<serde_js
 pub async fn start_recording(state: State<'_, AppState>, id: i32) -> Result<serde_json::Value, String> {
     let cameras = get_cameras(state.clone()).await?;
     let camera = cameras.into_iter().find(|c| c.id == id).ok_or("Camera not found")?;
+
+    // For UVC cameras: stop streaming if active (device can only be accessed by one process)
+    if camera.camera_type == "uvc" {
+        let was_streaming = {
+            let processes = state.processes.lock().map_err(|e| e.to_string())?;
+            processes.contains_key(&id)
+        };
+
+        if was_streaming {
+            println!("[Recording] UVC camera {} is streaming, stopping stream before recording", id);
+
+            // Stop current stream
+            if let Err(e) = crate::stream::stop_stream(state.clone(), id).await {
+                println!("[Recording] Warning: Failed to stop stream: {}", e);
+            }
+
+            // Wait for cleanup
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+            println!("[Recording] Stream stopped, starting recording for camera {}", id);
+        }
+    }
 
     crate::stream::start_recording(state, camera).await.map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "success": true }))
@@ -604,6 +667,7 @@ pub async fn add_recording_schedule(
             scheduler: state.scheduler.clone(),
             active_scheduled_recordings: state.active_scheduled_recordings.clone(),
             app_handle: state.app_handle.clone(),
+            plugin_manager: state.plugin_manager.clone(),
         });
 
         let scheduler = state.scheduler.lock().await;
@@ -728,6 +792,7 @@ pub async fn update_recording_schedule(
             scheduler: state.scheduler.clone(),
             active_scheduled_recordings: state.active_scheduled_recordings.clone(),
             app_handle: state.app_handle.clone(),
+            plugin_manager: state.plugin_manager.clone(),
         });
 
         let scheduler = state.scheduler.lock().await;

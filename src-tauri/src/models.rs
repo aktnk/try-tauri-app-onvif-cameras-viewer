@@ -7,13 +7,22 @@ pub struct Camera {
     pub id: i32,
     pub name: String,
     #[serde(rename = "type")]
-    pub camera_type: String, // "onvif" or "rtsp"
+    pub camera_type: String, // "onvif", "rtsp", or "uvc"
     pub host: String,
     pub port: i32,
     pub user: Option<String>,
     pub pass: Option<String>,
     pub xaddr: Option<String>,
     pub stream_path: Option<String>,
+    // UVC-specific fields
+    pub device_path: Option<String>,   // Linux: /dev/video0
+    pub device_id: Option<String>,     // Windows: device GUID
+    pub device_index: Option<i32>,     // macOS: AVFoundation index
+    // UVC video settings (detected from v4l2-ctl)
+    pub video_format: Option<String>,  // 'mjpeg' or 'yuyv'
+    pub video_width: Option<i32>,      // e.g., 1280
+    pub video_height: Option<i32>,     // e.g., 720
+    pub video_fps: Option<i32>,        // e.g., 30
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -29,6 +38,15 @@ pub struct NewCamera {
     pub pass: Option<String>,
     pub xaddr: Option<String>,
     pub stream_path: Option<String>,
+    // UVC-specific fields
+    pub device_path: Option<String>,
+    pub device_id: Option<String>,
+    pub device_index: Option<i32>,
+    // UVC video settings
+    pub video_format: Option<String>,
+    pub video_width: Option<i32>,
+    pub video_height: Option<i32>,
+    pub video_fps: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -83,21 +83,36 @@ const DiscoverCamerasModal: React.FC<DiscoverCamerasModalProps> = ({ open, onClo
     setAddError(null);
 
     try {
-      await addCamera({
+      const newCamera: any = {
         name: selectedDevice.name,
-        type: 'onvif',
-        host: selectedDevice.address,
+        type: selectedDevice.camera_type,
+        host: selectedDevice.host,
         port: selectedDevice.port,
-        user: credentials.user,
-        pass: credentials.pass,
-        xaddr: selectedDevice.xaddr || undefined
-      });
+        user: credentials.user || undefined,
+        pass: credentials.pass || undefined,
+      };
+
+      // Add type-specific fields
+      if (selectedDevice.camera_type === 'uvc') {
+        newCamera.device_path = selectedDevice.device_path || undefined;
+        newCamera.device_id = selectedDevice.device_id || undefined;
+        newCamera.device_index = selectedDevice.device_index || undefined;
+        newCamera.video_format = selectedDevice.video_format || undefined;
+        newCamera.video_width = selectedDevice.video_width || undefined;
+        newCamera.video_height = selectedDevice.video_height || undefined;
+        newCamera.video_fps = selectedDevice.video_fps || undefined;
+      }
+
+      console.log('[DiscoverCamerasModal] Adding camera:', JSON.stringify(newCamera, null, 2));
+      console.log('[DiscoverCamerasModal] Selected device:', JSON.stringify(selectedDevice, null, 2));
+
+      await addCamera(newCamera);
 
       // Success
       setIsAddDialogOpen(false);
       onCameraAdded();
       // Remove the added device from the list
-      setDevices(prevDevices => prevDevices.filter(d => d.address !== selectedDevice.address));
+      setDevices(prevDevices => prevDevices.filter(d => d.host !== selectedDevice.host || d.name !== selectedDevice.name));
     } catch (err: any) {
       console.error('Add camera error:', err);
       const errorMessage = err.response?.data?.message || 'Failed to add camera. Please check credentials.';
@@ -170,7 +185,10 @@ const DiscoverCamerasModal: React.FC<DiscoverCamerasModalProps> = ({ open, onClo
               </Typography>
               <List sx={{ bgcolor: 'background.paper', border: '1px solid #ccc', borderRadius: 1 }}>
                 {devices.map((device, index) => {
-                  const isRegistered = registeredCameras.some(c => c.host === device.address);
+                  const isRegistered = registeredCameras.some(c => c.host === device.host && c.name === device.name);
+                  const displayInfo = device.camera_type === 'uvc'
+                    ? `${device.device_path || device.device_id || `Index: ${device.device_index}`}`
+                    : `${device.host}:${device.port}`;
                   return (
                     <ListItem
                       key={index}
@@ -187,8 +205,8 @@ const DiscoverCamerasModal: React.FC<DiscoverCamerasModalProps> = ({ open, onClo
                       }
                     >
                       <ListItemText
-                        primary={`${device.name} (${device.manufacturer})`}
-                        secondary={`${device.address}:${device.port}`}
+                        primary={`${device.name} [${device.camera_type.toUpperCase()}]`}
+                        secondary={displayInfo}
                       />
                     </ListItem>
                   );
@@ -212,28 +230,46 @@ const DiscoverCamerasModal: React.FC<DiscoverCamerasModalProps> = ({ open, onClo
           {selectedDevice && (
             <>
               <Typography variant="body2" sx={{ mb: 2 }}>
-                Camera: <strong>{selectedDevice.name}</strong> at {selectedDevice.address}:{selectedDevice.port}
+                Camera: <strong>{selectedDevice.name}</strong> [{selectedDevice.camera_type.toUpperCase()}]
               </Typography>
-              <Typography variant="body2" sx={{ mb: 2 }}>
-                Enter the camera's ONVIF credentials:
+              <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+                {selectedDevice.camera_type === 'uvc'
+                  ? `Device: ${selectedDevice.device_path || selectedDevice.device_id || `Index ${selectedDevice.device_index}`}`
+                  : `Location: ${selectedDevice.host}:${selectedDevice.port}`
+                }
               </Typography>
-              <TextField
-                label="Username"
-                fullWidth
-                margin="normal"
-                value={credentials.user}
-                onChange={(e) => setCredentials({ ...credentials, user: e.target.value })}
-                disabled={isAdding}
-              />
-              <TextField
-                label="Password"
-                type="password"
-                fullWidth
-                margin="normal"
-                value={credentials.pass}
-                onChange={(e) => setCredentials({ ...credentials, pass: e.target.value })}
-                disabled={isAdding}
-              />
+
+              {selectedDevice.camera_type === 'onvif' && (
+                <>
+                  <Typography variant="body2" sx={{ mb: 2 }}>
+                    Enter the camera's ONVIF credentials:
+                  </Typography>
+                  <TextField
+                    label="Username"
+                    fullWidth
+                    margin="normal"
+                    value={credentials.user}
+                    onChange={(e) => setCredentials({ ...credentials, user: e.target.value })}
+                    disabled={isAdding}
+                  />
+                  <TextField
+                    label="Password"
+                    type="password"
+                    fullWidth
+                    margin="normal"
+                    value={credentials.pass}
+                    onChange={(e) => setCredentials({ ...credentials, pass: e.target.value })}
+                    disabled={isAdding}
+                  />
+                </>
+              )}
+
+              {selectedDevice.camera_type === 'uvc' && (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  UVC cameras do not require authentication. Click "Add" to continue.
+                </Alert>
+              )}
+
               {addError && (
                 <Alert severity="error" sx={{ mt: 2 }}>
                   {addError}
@@ -249,7 +285,7 @@ const DiscoverCamerasModal: React.FC<DiscoverCamerasModalProps> = ({ open, onClo
           <Button
             onClick={handleAddCamera}
             variant="contained"
-            disabled={isAdding || !credentials.user || !credentials.pass}
+            disabled={isAdding || (selectedDevice?.camera_type === 'onvif' && (!credentials.user || !credentials.pass))}
           >
             {isAdding ? 'Adding...' : 'Add Camera'}
           </Button>

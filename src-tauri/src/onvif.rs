@@ -372,7 +372,7 @@ pub async fn stop_move(camera: &Camera) -> Result<(), String> {
     Ok(())
 }
 
-fn build_soap_envelope(user: &str, pass: &str, body_content: &str) -> String {
+pub fn build_soap_envelope(user: &str, pass: &str, body_content: &str) -> String {
     let security_header = if !user.is_empty() {
         generate_security_header(user, pass)
     } else {

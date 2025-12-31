@@ -21,7 +21,7 @@ impl EncoderSelector {
         }
     }
 
-    pub async fn select_encoder_for_streaming(&self) -> EncoderConfig {
+    pub async fn select_encoder_for_streaming(&self, fps: Option<i32>) -> EncoderConfig {
         match self.settings.encoderMode.as_str() {
             "Auto" => {
                 // Try GPU first, fallback to CPU
@@ -29,30 +29,30 @@ impl EncoderSelector {
                     if self.capabilities.availableEncoders.contains(gpu_enc) {
                         println!("[Encoder] Auto mode: trying GPU encoder {}", gpu_enc);
                         if test_encoder(gpu_enc).await {
-                            return self.build_gpu_config_streaming(gpu_enc);
+                            return self.build_gpu_config_streaming(gpu_enc, fps);
                         }
                         println!("[Encoder] GPU encoder test failed, falling back to CPU");
                     }
                 }
                 // Fallback to CPU
                 println!("[Encoder] Using CPU encoder (fallback)");
-                self.build_cpu_config_streaming()
+                self.build_cpu_config_streaming(fps)
             }
             "GpuOnly" => {
                 // GPU only, no fallback
                 let gpu_enc = self.settings.gpuEncoder.as_ref()
                     .expect("GPU encoder must be set for GpuOnly mode");
                 println!("[Encoder] GpuOnly mode: using {}", gpu_enc);
-                self.build_gpu_config_streaming(gpu_enc)
+                self.build_gpu_config_streaming(gpu_enc, fps)
             }
             "CpuOnly" => {
                 // CPU only
                 println!("[Encoder] CpuOnly mode: using {}", self.settings.cpuEncoder);
-                self.build_cpu_config_streaming()
+                self.build_cpu_config_streaming(fps)
             }
             _ => {
                 println!("[Encoder] Unknown encoder mode, defaulting to CPU");
-                self.build_cpu_config_streaming()
+                self.build_cpu_config_streaming(fps)
             }
         }
     }
@@ -82,8 +82,13 @@ impl EncoderSelector {
         }
     }
 
-    fn build_gpu_config_streaming(&self, encoder: &str) -> EncoderConfig {
+    fn build_gpu_config_streaming(&self, encoder: &str, fps: Option<i32>) -> EncoderConfig {
         let mut args = Vec::new();
+
+        // Calculate keyframe interval: fps * 2 for 2-second segments
+        // Default to 60 if FPS not provided (for ONVIF cameras)
+        let keyframe_interval = fps.map(|f| f * 2).unwrap_or(60).to_string();
+        println!("[Encoder] Using keyframe interval: {} (FPS: {:?})", keyframe_interval, fps);
 
         match encoder {
             "h264_nvenc" | "hevc_nvenc" => {
@@ -97,7 +102,8 @@ impl EncoderSelector {
                     "-b:v".to_string(), "4M".to_string(),
                     "-maxrate".to_string(), "4M".to_string(),
                     "-bufsize".to_string(), "2M".to_string(),
-                    "-g".to_string(), "60".to_string(),          // keyframe interval
+                    "-g".to_string(), keyframe_interval.clone(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                     "-bf".to_string(), "0".to_string(),          // no B-frames
                 ]);
             }
@@ -113,7 +119,8 @@ impl EncoderSelector {
                     "-b:v".to_string(), "4M".to_string(),
                     "-maxrate".to_string(), "4M".to_string(),
                     "-bufsize".to_string(), "2M".to_string(),
-                    "-g".to_string(), "60".to_string(),
+                    "-g".to_string(), keyframe_interval.clone(),
+                    "-sc_threshold".to_string(), "0".to_string(),  // disable scene change detection
                 ]);
             }
             "h264_amf" | "hevc_amf" => {
@@ -125,7 +132,8 @@ impl EncoderSelector {
                     "-b:v".to_string(), "4M".to_string(),
                     "-maxrate".to_string(), "4M".to_string(),
                     "-bufsize".to_string(), "2M".to_string(),
-                    "-g".to_string(), "60".to_string(),
+                    "-g".to_string(), keyframe_interval.clone(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                 ]);
             }
             "h264_vaapi" | "hevc_vaapi" => {
@@ -138,7 +146,8 @@ impl EncoderSelector {
                     "-quality".to_string(), "1".to_string(),     // 1=speed, 4=quality
                     "-b:v".to_string(), "4M".to_string(),
                     "-maxrate".to_string(), "4M".to_string(),
-                    "-g".to_string(), "60".to_string(),
+                    "-g".to_string(), keyframe_interval.clone(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                 ]);
             }
             "h264_videotoolbox" | "hevc_videotoolbox" => {
@@ -149,7 +158,8 @@ impl EncoderSelector {
                     "-maxrate".to_string(), "4M".to_string(),
                     "-bufsize".to_string(), "2M".to_string(),
                     "-realtime".to_string(), "1".to_string(),
-                    "-g".to_string(), "60".to_string(),
+                    "-g".to_string(), keyframe_interval.clone(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                 ]);
             }
             _ => {
@@ -157,7 +167,8 @@ impl EncoderSelector {
                 args.extend_from_slice(&[
                     "-c:v".to_string(), encoder.to_string(),
                     "-b:v".to_string(), "4M".to_string(),
-                    "-g".to_string(), "60".to_string(),
+                    "-g".to_string(), keyframe_interval.clone(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                 ]);
             }
         }
@@ -169,14 +180,19 @@ impl EncoderSelector {
         }
     }
 
-    fn build_cpu_config_streaming(&self) -> EncoderConfig {
+    fn build_cpu_config_streaming(&self, fps: Option<i32>) -> EncoderConfig {
+        // Calculate keyframe interval: fps * 2 for 2-second segments
+        // Default to 60 if FPS not provided (for ONVIF cameras)
+        let keyframe_interval = fps.map(|f| f * 2).unwrap_or(60).to_string();
+        println!("[Encoder] CPU using keyframe interval: {} (FPS: {:?})", keyframe_interval, fps);
+
         // Current CPU configuration (from stream.rs)
         let args = vec![
             "-c:v".to_string(), self.settings.cpuEncoder.clone(),
             "-preset".to_string(), self.settings.preset.clone(),
             "-tune".to_string(), "zerolatency".to_string(),
-            "-g".to_string(), "60".to_string(),
-            "-keyint_min".to_string(), "60".to_string(),
+            "-g".to_string(), keyframe_interval.clone(),
+            "-keyint_min".to_string(), keyframe_interval.clone(),
             "-sc_threshold".to_string(), "0".to_string(),
             "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),
         ];
@@ -203,6 +219,7 @@ impl EncoderSelector {
                     "-maxrate".to_string(), "10M".to_string(),
                     "-bufsize".to_string(), "8M".to_string(),
                     "-g".to_string(), "120".to_string(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                 ]);
             }
             "h264_qsv" | "hevc_qsv" => {
@@ -216,6 +233,7 @@ impl EncoderSelector {
                     "-b:v".to_string(), "8M".to_string(),
                     "-maxrate".to_string(), "10M".to_string(),
                     "-g".to_string(), "120".to_string(),
+                    "-sc_threshold".to_string(), "0".to_string(),  // disable scene change detection
                 ]);
             }
             "h264_amf" | "hevc_amf" => {
@@ -226,6 +244,7 @@ impl EncoderSelector {
                     "-b:v".to_string(), "8M".to_string(),
                     "-maxrate".to_string(), "10M".to_string(),
                     "-g".to_string(), "120".to_string(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                 ]);
             }
             "h264_vaapi" | "hevc_vaapi" => {
@@ -239,6 +258,7 @@ impl EncoderSelector {
                     "-b:v".to_string(), "8M".to_string(),
                     "-maxrate".to_string(), "10M".to_string(),
                     "-g".to_string(), "120".to_string(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                 ]);
             }
             "h264_videotoolbox" | "hevc_videotoolbox" => {
@@ -247,6 +267,7 @@ impl EncoderSelector {
                     "-b:v".to_string(), "8M".to_string(),
                     "-maxrate".to_string(), "10M".to_string(),
                     "-g".to_string(), "120".to_string(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                 ]);
             }
             _ => {
@@ -254,6 +275,7 @@ impl EncoderSelector {
                     "-c:v".to_string(), encoder.to_string(),
                     "-b:v".to_string(), "8M".to_string(),
                     "-g".to_string(), "120".to_string(),
+                    "-force_key_frames".to_string(), "expr:gte(t,n_forced*2)".to_string(),  // force keyframe every 2 seconds
                 ]);
             }
         }

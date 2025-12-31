@@ -6,6 +6,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SyncIcon from '@mui/icons-material/Sync';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import CableIcon from '@mui/icons-material/Cable';
+import UsbIcon from '@mui/icons-material/Usb';
 
 
 interface CameraListProps {
@@ -73,11 +74,17 @@ const CameraList: React.FC<CameraListProps> = ({ cameras, loading, error, active
           cameras.map((camera) => {
             const isActive = activeCameraIds.includes(camera.id);
             const isOnvif = camera.type === 'onvif';
+            const isUvc = camera.type === 'uvc';
 
             // Build secondary text based on camera type
-            const secondaryText = isOnvif
-              ? `${camera.host}:${camera.port}`
-              : `rtsp://${camera.host}:${camera.port}${camera.stream_path || '/'}`;
+            let secondaryText = '';
+            if (isUvc) {
+              secondaryText = camera.device_path || camera.device_id || `Index: ${camera.device_index}` || 'UVC Device';
+            } else if (isOnvif) {
+              secondaryText = `${camera.host}:${camera.port}`;
+            } else {
+              secondaryText = `rtsp://${camera.host}:${camera.port}${camera.stream_path || '/'}`;
+            }
 
             return (
               <ListItem
@@ -120,10 +127,10 @@ const CameraList: React.FC<CameraListProps> = ({ cameras, loading, error, active
               >
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Chip
-                    icon={isOnvif ? <VideocamIcon /> : <CableIcon />}
-                    label={isOnvif ? 'ONVIF' : 'RTSP'}
+                    icon={isUvc ? <UsbIcon /> : (isOnvif ? <VideocamIcon /> : <CableIcon />)}
+                    label={isUvc ? 'UVC' : (isOnvif ? 'ONVIF' : 'RTSP')}
                     size="small"
-                    color={isOnvif ? 'primary' : 'secondary'}
+                    color={isUvc ? 'success' : (isOnvif ? 'primary' : 'secondary')}
                   />
                   <ListItemText
                     primary={camera.name}

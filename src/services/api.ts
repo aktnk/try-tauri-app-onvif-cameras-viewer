@@ -3,22 +3,36 @@ import { invoke } from '@tauri-apps/api/core';
 export interface Camera {
   id: number;
   name: string;
-  type: 'onvif' | 'rtsp';
+  type: 'onvif' | 'rtsp' | 'uvc';
   host: string;
   port: number;
   xaddr?: string | null;  // ONVIF only
   stream_path?: string | null;  // RTSP only
+  device_path?: string | null;  // UVC: /dev/video0
+  device_id?: string | null;    // UVC: Windows device ID
+  device_index?: number | null; // UVC: macOS device index
+  video_format?: string | null; // UVC: mjpeg/yuyv
+  video_width?: number | null;  // UVC: 1280
+  video_height?: number | null; // UVC: 720
+  video_fps?: number | null;    // UVC: 30
 }
 
 export type NewCamera = {
   name: string;
-  type: 'onvif' | 'rtsp';
+  type: 'onvif' | 'rtsp' | 'uvc';
   host: string;
   port: number;
   user?: string;
   pass?: string;
   xaddr?: string;
   stream_path?: string;
+  device_path?: string;
+  device_id?: string;
+  device_index?: number;
+  video_format?: string;
+  video_width?: number;
+  video_height?: number;
+  video_fps?: number;
 };
 
 export const getCameras = async (): Promise<Camera[]> => {
@@ -34,16 +48,23 @@ export const deleteCamera = async (id: number): Promise<void> => {
 };
 
 export interface DiscoveredDevice {
-  address: string;
-  port: number;
-  hostname: string;
   name: string;
-  manufacturer: string;
-  xaddr: string | null;
+  host: string;
+  port: number;
+  camera_type: string;  // "onvif" or "uvc"
+  user?: string | null;
+  pass?: string | null;
+  device_path?: string | null;  // UVC: /dev/video0
+  device_id?: string | null;    // UVC: Windows device ID
+  device_index?: number | null; // UVC: macOS device index
+  video_format?: string | null; // UVC: mjpeg/yuyv
+  video_width?: number | null;  // UVC: 1280
+  video_height?: number | null; // UVC: 720
+  video_fps?: number | null;    // UVC: 30
 }
 
 export const discoverCameras = async (): Promise<DiscoveredDevice[]> => {
-  // Subnet scan is handled in Rust, which might take time.
+  // Scans for both ONVIF and UVC cameras
   return await invoke('discover_cameras');
 };
 
